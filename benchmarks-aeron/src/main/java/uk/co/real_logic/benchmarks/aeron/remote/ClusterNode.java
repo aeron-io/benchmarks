@@ -134,6 +134,7 @@ public final class ClusterNode
             Component<ClusteredServiceContainer> csc = clusteredServiceContainer.start();
             FailoverControlServer failoverControlServer = createFailoverControlServer(
                 type,
+                memberId,
                 consensusModule,
                 clusteredServiceContainer,
                 roleRef)
@@ -163,6 +164,7 @@ public final class ClusterNode
 
     private static FailoverControlServer createFailoverControlServer(
         final Type type,
+        final int memberId,
         final Component<ConsensusModule> consensusModule,
         final Component<ClusteredServiceContainer> clusteredServiceContainer,
         final AtomicReference<Cluster.Role> roleRef)
@@ -175,6 +177,7 @@ public final class ClusterNode
             final FailoverControlServer failoverControlServer = new FailoverControlServer(
                 hostname,
                 port,
+                memberId,
                 roleRef,
                 consensusModule,
                 clusteredServiceContainer,

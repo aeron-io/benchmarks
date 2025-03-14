@@ -29,6 +29,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
@@ -45,6 +46,7 @@ import static uk.co.real_logic.benchmarks.util.PropertiesUtil.mergeWithSystemPro
 public final class FailoverTestRig implements FailoverListener
 {
     private final Configuration configuration;
+    private final FailoverConfiguration failoverConfiguration;
     private final FailoverTransceiver transceiver;
     private final PrintStream out;
     private final NanoClock clock;
@@ -58,6 +60,9 @@ public final class FailoverTestRig implements FailoverListener
     private int sendPosition;
     private int ackPosition;
 
+    private long followerRestartAt;
+    private long followerRestartRequestedAt;
+    private boolean followerRestartRequested;
     private long failoverAt;
     private long failoverRequestedAt;
     private boolean failoverRequested;
@@ -65,6 +70,7 @@ public final class FailoverTestRig implements FailoverListener
     private long restartRequestedAt;
     private boolean restartRequested;
     private boolean synced = true;
+    private int leaderMemberId;
 
     public FailoverTestRig(final Configuration configuration, final FailoverConfiguration failoverConfiguration)
     {
@@ -93,6 +99,7 @@ public final class FailoverTestRig implements FailoverListener
         final PersistedHistogram persistedHistogram)
     {
         this.configuration = validate(requireNonNull(configuration));
+        this.failoverConfiguration = requireNonNull(failoverConfiguration);
         this.transceiver = requireNonNull(transceiver);
         this.out = requireNonNull(out);
         this.clock = requireNonNull(clock);
@@ -106,7 +113,7 @@ public final class FailoverTestRig implements FailoverListener
 
         controlClient = new FailoverControlClient(failoverConfiguration.controlEndpoints());
 
-        failoverAt = restartAt = clock.nanoTime() + TimeUnit.DAYS.toNanos(1);
+        followerRestartAt = failoverAt = restartAt = clock.nanoTime() + TimeUnit.DAYS.toNanos(1);
     }
 
     private Configuration validate(final Configuration configuration)
@@ -134,8 +141,10 @@ public final class FailoverTestRig implements FailoverListener
 
             if (configuration.warmupIterations() > 0)
             {
-                out.printf("%nRunning warmup for %,d iterations of %,d messages each, with %,d bytes payload and a" +
-                    " burst size of %,d...%n",
+                out.printf(
+                    "%n%s Running warmup for %,d iterations of %,d messages each, with %,d bytes payload and" +
+                    " a burst size of %,d...%n",
+                    Instant.now(),
                     configuration.warmupIterations(),
                     configuration.warmupMessageRate(),
                     configuration.messageLength(),
@@ -145,13 +154,16 @@ public final class FailoverTestRig implements FailoverListener
                 persistedHistogram.reset();
             }
 
-            out.printf("%nRunning measurement for %,d iterations of %,d messages each, with %,d bytes payload and a" +
-                " burst size of %,d...%n",
+            out.printf(
+                "%n%s Running measurement for %,d iterations of %,d messages each, with %,d bytes payload and" +
+                " a burst size of %,d...%n",
+                Instant.now(),
                 configuration.iterations(),
                 configuration.messageRate(),
                 configuration.messageLength(),
                 configuration.batchSize());
-            failoverAt = clock.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            followerRestartAt = clock.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            failoverAt = clock.nanoTime() + failoverConfiguration.failoverDelayNs();
             runTest(configuration.iterations(), configuration.messageRate());
 
             out.printf("%nHistogram of RTT latencies in microseconds.%n");
@@ -202,6 +214,7 @@ public final class FailoverTestRig implements FailoverListener
             }
 
             final long t0 = generationTimestamps[startIndex];
+            writeAnnotation("follower restart", followerRestartRequestedAt, t0, writer);
             writeAnnotation("failover", failoverRequestedAt, t0, writer);
             writeAnnotation("restart", restartRequestedAt, t0, writer);
         }
@@ -263,6 +276,15 @@ public final class FailoverTestRig implements FailoverListener
                 throw new RuntimeException("Timed out");
             }
 
+            if (now - followerRestartAt >= 0 && !followerRestartRequested)
+            {
+                final int nodeIdToRestart = leaderMemberId == 0 ? 1 : 0;
+                followerRestartRequestedAt = clock.nanoTime();
+                controlClient.sendCycleNodeCommand(nodeIdToRestart);
+                followerRestartRequested = true;
+                workCount++;
+            }
+
             if (now - failoverAt >= 0 && !failoverRequested)
             {
                 failoverRequestedAt = clock.nanoTime();
@@ -307,6 +329,7 @@ public final class FailoverTestRig implements FailoverListener
 
     public void onConnected(final long sessionId, final int leaderMemberId)
     {
+        this.leaderMemberId = leaderMemberId;
         out.println("Established session " + sessionId + " with leader node " + leaderMemberId);
     }
 

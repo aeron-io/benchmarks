@@ -53,7 +53,7 @@ function start_media_driver()
     command+="; $(pin_thread "\${media_driver_pid}" "driver-conducto" "${5}")"
     command+="; $(pin_thread "\${media_driver_pid}" "sender" "${6}")"
     command+="; $(pin_thread "\${media_driver_pid}" "receiver" "${7}")"
-    command+="; $(pin_thread "\${media_driver_pid}" "async-exec" "${8}")"
+    command+="; $(pin_thread "\${media_driver_pid}" "async-task-exec" "${8}")"
   fi
 
   echo ${command}

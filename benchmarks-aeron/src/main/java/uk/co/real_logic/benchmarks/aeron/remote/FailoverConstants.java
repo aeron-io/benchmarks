@@ -33,6 +33,7 @@ public final class FailoverConstants
 
     public static final int LEADER_STEP_DOWN_COMMAND = 1;
     public static final int RESTART_COMMAND = 2;
+    public static final int CYCLE_NODE_COMMAND = 3;
 
     private FailoverConstants()
     {
