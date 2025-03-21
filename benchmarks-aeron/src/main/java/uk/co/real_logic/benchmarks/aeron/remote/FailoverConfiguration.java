@@ -15,20 +15,26 @@
  */
 package uk.co.real_logic.benchmarks.aeron.remote;
 
+import org.agrona.SystemUtil;
+
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static uk.co.real_logic.benchmarks.aeron.remote.AeronUtil.FAILOVER_CONTROL_ENDPOINTS_PROP_NAME;
+import static uk.co.real_logic.benchmarks.aeron.remote.AeronUtil.FAILOVER_DELAY_PROP_NAME;
 
 public final class FailoverConfiguration
 {
     private final List<InetSocketAddress> controlEndpoints;
+    private final long failoverDelayNs;
 
     private FailoverConfiguration(final Builder builder)
     {
         this.controlEndpoints = new ArrayList<>(builder.controlEndpoints);
+        this.failoverDelayNs = builder.failoverDelayNs;
     }
 
     public List<InetSocketAddress> controlEndpoints()
@@ -36,9 +42,15 @@ public final class FailoverConfiguration
         return Collections.unmodifiableList(controlEndpoints);
     }
 
+    public long failoverDelayNs()
+    {
+        return failoverDelayNs;
+    }
+
     public static final class Builder
     {
         private List<InetSocketAddress> controlEndpoints;
+        private long failoverDelayNs = Long.MIN_VALUE;
 
         public Builder controlEndpoints(final List<InetSocketAddress> controlEndpoints)
         {
@@ -46,8 +58,19 @@ public final class FailoverConfiguration
             return this;
         }
 
+        public Builder failoverDelayNs(final long failoverDelayNs)
+        {
+            this.failoverDelayNs = failoverDelayNs;
+            return this;
+        }
+
         public FailoverConfiguration build()
         {
+            if (failoverDelayNs == Long.MIN_VALUE)
+            {
+                throw new IllegalStateException("failoverDelayNs must be set");
+            }
+
             return new FailoverConfiguration(this);
         }
     }
@@ -62,6 +85,8 @@ public final class FailoverConfiguration
             throw new IllegalStateException(FAILOVER_CONTROL_ENDPOINTS_PROP_NAME + " must be set");
         }
         builder.controlEndpoints(parseEndpoints(controlEndpoints));
+
+        builder.failoverDelayNs(SystemUtil.getDurationInNanos(FAILOVER_DELAY_PROP_NAME, TimeUnit.SECONDS.toNanos(30)));
 
         return builder.build();
     }

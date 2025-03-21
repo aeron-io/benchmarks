@@ -34,5 +34,6 @@ do
   script="$(cat latency_around_failover.p)"
   insert_annotation "failover" 40
   insert_annotation "restart" 41
+  insert_annotation "follower restart" 42
   gnuplot -p -e "filename='$csv_file'" <(echo "$script")
 done

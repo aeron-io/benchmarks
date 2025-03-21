@@ -22,8 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.util.List;
 
-import static uk.co.real_logic.benchmarks.aeron.remote.FailoverConstants.LEADER_STEP_DOWN_COMMAND;
-import static uk.co.real_logic.benchmarks.aeron.remote.FailoverConstants.RESTART_COMMAND;
+import static uk.co.real_logic.benchmarks.aeron.remote.FailoverConstants.*;
 
 public final class FailoverControlClient implements AutoCloseable
 {
@@ -76,18 +75,31 @@ public final class FailoverControlClient implements AutoCloseable
 
     public void sendStepDownCommand()
     {
-        sendCommand(LEADER_STEP_DOWN_COMMAND);
+        prepareCommand(LEADER_STEP_DOWN_COMMAND);
+        sendCommand();
     }
 
     public void sendRestartCommand()
     {
-        sendCommand(RESTART_COMMAND);
+        prepareCommand(RESTART_COMMAND);
+        sendCommand();
     }
 
-    private void sendCommand(final int command)
+    public void sendCycleNodeCommand(final int nodeId)
+    {
+        prepareCommand(CYCLE_NODE_COMMAND);
+        byteBuffer.putInt(nodeId);
+        sendCommand();
+    }
+
+    private void prepareCommand(final int command)
     {
         byteBuffer.clear();
         byteBuffer.putInt(command);
+    }
+
+    private void sendCommand()
+    {
         byteBuffer.flip();
 
         for (final InetSocketAddress target : targets)

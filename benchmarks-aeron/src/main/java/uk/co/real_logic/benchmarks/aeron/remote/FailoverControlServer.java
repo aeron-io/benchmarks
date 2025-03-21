@@ -27,12 +27,15 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.DatagramChannel;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 public final class FailoverControlServer implements AutoCloseable
 {
     private final DatagramChannel channel;
     private final Thread thread;
+    private final int memberId;
     private final AtomicReference<Cluster.Role> roleRef;
     private final Component<ConsensusModule> consensusModule;
     private final Component<ClusteredServiceContainer> clusteredServiceContainer;
@@ -43,11 +46,13 @@ public final class FailoverControlServer implements AutoCloseable
     public FailoverControlServer(
         final String hostname,
         final int port,
+        final int memberId,
         final AtomicReference<Cluster.Role> roleRef,
         final Component<ConsensusModule> consensusModule,
         final Component<ClusteredServiceContainer> clusteredServiceContainer,
         final ErrorHandler errorHandler)
     {
+        this.memberId = memberId;
         this.roleRef = roleRef;
         this.consensusModule = consensusModule;
         this.clusteredServiceContainer = clusteredServiceContainer;
@@ -152,6 +157,17 @@ public final class FailoverControlServer implements AutoCloseable
                     consensusModule.start();
                     clusteredServiceContainer.start();
                     closed = false;
+                }
+                else if (command == FailoverConstants.CYCLE_NODE_COMMAND)
+                {
+                    final int nodeId = byteBuffer.getInt();
+                    if (nodeId == memberId)
+                    {
+                        CloseHelper.closeAll(consensusModule, clusteredServiceContainer);
+                        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(2000)); // 2 timer intervals
+                        consensusModule.start();
+                        clusteredServiceContainer.start();
+                    }
                 }
             }
             catch (final AsynchronousCloseException e)

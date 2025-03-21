@@ -84,6 +84,7 @@ then
   exit 1
 fi
 
+CLUSTER_APPOINTED_LEADER_ID=${CLUSTER_APPOINTED_LEADER_ID:-0}
 CLUSTER_BACKUP_NODES=${CLUSTER_BACKUP_NODES:-0}
 ef_vi_rxq_size=${AERON_EF_VI_RXQ_SIZE:-2048} # ef_vi receive queue size
 ef_vi_txq_size=${AERON_EF_VI_TXQ_SIZE:-2048} # ef_vi send queue size
@@ -249,7 +250,7 @@ function start_cluster_node()
     -Daeron.cluster.id=${CLUSTER_ID} \
     -Daeron.cluster.members=${CLUSTER_MEMBERS} \
     -Daeron.cluster.member.id=${node_id} \
-    -Daeron.cluster.appointed.leader.id=0 \
+    -Daeron.cluster.appointed.leader.id=${CLUSTER_APPOINTED_LEADER_ID} \
     -Daeron.cluster.consensus.channel=${!cluster_consensus_channel_var} \
     -Daeron.cluster.ingress.channel=${!cluster_ingress_channel_var} \
     -Daeron.cluster.log.channel=${!cluster_log_channel_var} \

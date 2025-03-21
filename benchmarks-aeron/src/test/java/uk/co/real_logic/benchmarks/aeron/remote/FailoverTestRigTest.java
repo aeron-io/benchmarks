@@ -40,6 +40,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
@@ -82,6 +83,7 @@ class FailoverTestRigTest
 
         final FailoverConfiguration failoverConfiguration = new FailoverConfiguration.Builder()
             .controlEndpoints(controlEndpoints)
+            .failoverDelayNs(TimeUnit.SECONDS.toNanos(4))
             .build();
 
         final FailoverTransceiver transceiver = new ClusterFailoverTransceiver(testClient.aeronClusterContext);
@@ -165,6 +167,7 @@ class FailoverTestRigTest
             failoverControlServer = new FailoverControlServer(
                 "localhost",
                 0,
+                clusterMemberId,
                 roleRef,
                 consensusModule,
                 clusteredServiceContainer,

@@ -115,6 +115,8 @@ final class AeronUtil
         "uk.co.real_logic.benchmarks.aeron.remote.cluster.failover.control.server.port";
     static final String FAILOVER_CONTROL_ENDPOINTS_PROP_NAME =
         "uk.co.real_logic.benchmarks.aeron.remote.cluster.failover.control.endpoints";
+    static final String FAILOVER_DELAY_PROP_NAME =
+        "uk.co.real_logic.benchmarks.aeron.remote.cluster.failover.delay";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
     private static final int SEND_ATTEMPTS = 3;
 
