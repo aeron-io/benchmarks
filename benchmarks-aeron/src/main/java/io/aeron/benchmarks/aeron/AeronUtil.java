@@ -81,41 +81,41 @@ import static org.agrona.concurrent.status.CountersReader.NULL_COUNTER_ID;
 import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithEmbeddedDriver;
 import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithStandaloneDriver;
 
-final class AeronUtil
+public final class AeronUtil
 {
-    static final int TIMESTAMP_OFFSET = 0;
-    static final int RECEIVER_INDEX_OFFSET = TIMESTAMP_OFFSET + SIZE_OF_LONG;
-    static final int MIN_MESSAGE_LENGTH = RECEIVER_INDEX_OFFSET + SIZE_OF_LONG + SIZE_OF_LONG;
+    public static final int TIMESTAMP_OFFSET = 0;
+    public static final int RECEIVER_INDEX_OFFSET = TIMESTAMP_OFFSET + SIZE_OF_LONG;
+    public static final int MIN_MESSAGE_LENGTH = RECEIVER_INDEX_OFFSET + SIZE_OF_LONG + SIZE_OF_LONG;
 
-    static final String RECEIVER_INDEX_PROP_NAME = "io.aeron.benchmarks.aeron.receiver.index";
-    static final String NUMBER_OF_RECEIVERS_PROP_NAME =
+    public static final String RECEIVER_INDEX_PROP_NAME = "io.aeron.benchmarks.aeron.receiver.index";
+    public static final String NUMBER_OF_RECEIVERS_PROP_NAME =
         "io.aeron.benchmarks.aeron.receiver.count";
-    static final String CLUSTER_SERVICE_PROP_NAME = "io.aeron.benchmarks.aeron.cluster.service";
-    static final String SNAPSHOT_SIZE_PROP_NAME = "io.aeron.benchmarks.aeron.cluster.snapshot.size";
-    static final long DEFAULT_SNAPSHOT_SIZE = 0;
-    static final String DESTINATION_CHANNEL_PROP_NAME =
+    public static final String CLUSTER_SERVICE_PROP_NAME = "io.aeron.benchmarks.aeron.cluster.service";
+    public static final String SNAPSHOT_SIZE_PROP_NAME = "io.aeron.benchmarks.aeron.cluster.snapshot.size";
+    public static final long DEFAULT_SNAPSHOT_SIZE = 0;
+    public static final String DESTINATION_CHANNEL_PROP_NAME =
         "io.aeron.benchmarks.aeron.destination.channel";
-    static final String DESTINATION_STREAM_PROP_NAME =
+    public static final String DESTINATION_STREAM_PROP_NAME =
         "io.aeron.benchmarks.aeron.destination.stream";
-    static final String SOURCE_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.source.channel";
-    static final String SOURCE_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.source.stream";
-    static final String RECORD_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.record.channel";
-    static final String RECORD_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.record.stream";
-    static final String REPLAY_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.replay.channel";
-    static final String REPLAY_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.replay.stream";
-    static final String EMBEDDED_MEDIA_DRIVER_PROP_NAME =
+    public static final String SOURCE_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.source.channel";
+    public static final String SOURCE_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.source.stream";
+    public static final String RECORD_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.record.channel";
+    public static final String RECORD_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.record.stream";
+    public static final String REPLAY_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.replay.channel";
+    public static final String REPLAY_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.replay.stream";
+    public static final String EMBEDDED_MEDIA_DRIVER_PROP_NAME =
         "io.aeron.benchmarks.aeron.embedded.media.driver";
-    static final String FRAGMENT_LIMIT_PROP_NAME = "io.aeron.benchmarks.aeron.fragment.limit";
-    static final String IDLE_STRATEGY_PROP_NAME = "io.aeron.benchmarks.aeron.idle.strategy";
-    static final String CONNECTION_TIMEOUT_PROP_NAME = "io.aeron.benchmarks.aeron.connection.timeout";
-    static final int FRAGMENT_LIMIT = getInteger(FRAGMENT_LIMIT_PROP_NAME, 10);
-    static final String FAILOVER_CONTROL_SERVER_HOSTNAME_PROP_NAME =
+    public static final String FRAGMENT_LIMIT_PROP_NAME = "io.aeron.benchmarks.aeron.fragment.limit";
+    public static final String IDLE_STRATEGY_PROP_NAME = "io.aeron.benchmarks.aeron.idle.strategy";
+    public static final String CONNECTION_TIMEOUT_PROP_NAME = "io.aeron.benchmarks.aeron.connection.timeout";
+    public static final int FRAGMENT_LIMIT = getInteger(FRAGMENT_LIMIT_PROP_NAME, 10);
+    public static final String FAILOVER_CONTROL_SERVER_HOSTNAME_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.control.server.hostname";
-    static final String FAILOVER_CONTROL_SERVER_PORT_PROP_NAME =
+    public static final String FAILOVER_CONTROL_SERVER_PORT_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.control.server.port";
-    static final String FAILOVER_CONTROL_ENDPOINTS_PROP_NAME =
+    public static final String FAILOVER_CONTROL_ENDPOINTS_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.control.endpoints";
-    static final String FAILOVER_DELAY_PROP_NAME =
+    public static final String FAILOVER_DELAY_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.delay";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
     private static final int SEND_ATTEMPTS = 3;
@@ -124,17 +124,17 @@ final class AeronUtil
     {
     }
 
-    static int receiverCount()
+    public static int receiverCount()
     {
         return Integer.getInteger(NUMBER_OF_RECEIVERS_PROP_NAME, 1);
     }
 
-    static int receiverIndex()
+    public static int receiverIndex()
     {
         return Integer.getInteger(RECEIVER_INDEX_PROP_NAME, 0);
     }
 
-    static void validateMessageLength(final int messageLength)
+    public static void validateMessageLength(final int messageLength)
     {
         if (messageLength < MIN_MESSAGE_LENGTH)
         {
@@ -142,7 +142,7 @@ final class AeronUtil
         }
     }
 
-    static long connectionTimeoutNs()
+    public static long connectionTimeoutNs()
     {
         final String value = getProperty(CONNECTION_TIMEOUT_PROP_NAME);
         if (isEmpty(value))
@@ -153,7 +153,7 @@ final class AeronUtil
         return parseDuration(CONNECTION_TIMEOUT_PROP_NAME, value);
     }
 
-    static String destinationChannel()
+    public static String destinationChannel()
     {
         final String property = getProperty(DESTINATION_CHANNEL_PROP_NAME);
         if (isEmpty(property))
@@ -164,7 +164,7 @@ final class AeronUtil
         return property;
     }
 
-    static int destinationStreamId()
+    public static int destinationStreamId()
     {
         final String property = getProperty(DESTINATION_STREAM_PROP_NAME);
         if (isEmpty(property))
@@ -175,7 +175,7 @@ final class AeronUtil
         return Integer.parseInt(property);
     }
 
-    static String sourceChannel()
+    public static String sourceChannel()
     {
         final String property = getProperty(SOURCE_CHANNEL_PROP_NAME);
         if (isEmpty(property))
@@ -186,7 +186,7 @@ final class AeronUtil
         return property;
     }
 
-    static int sourceStreamId()
+    public static int sourceStreamId()
     {
         final String property = getProperty(SOURCE_STREAM_PROP_NAME);
         if (isEmpty(property))
@@ -197,7 +197,7 @@ final class AeronUtil
         return Integer.parseInt(property);
     }
 
-    static String recordChannel()
+    public static String recordChannel()
     {
         final String property = getProperty(RECORD_CHANNEL_PROP_NAME);
         if (isEmpty(property))
@@ -207,7 +207,7 @@ final class AeronUtil
         return property;
     }
 
-    static int recordStream()
+    public static int recordStream()
     {
         final String property = getProperty(RECORD_STREAM_PROP_NAME);
         if (isEmpty(property))
@@ -217,7 +217,7 @@ final class AeronUtil
         return Integer.parseInt(property);
     }
 
-    static String replayChannel()
+    public static String replayChannel()
     {
         final String property = getProperty(REPLAY_CHANNEL_PROP_NAME);
         if (isEmpty(property))
@@ -228,7 +228,7 @@ final class AeronUtil
         return property;
     }
 
-    static int replayStreamId()
+    public static int replayStreamId()
     {
         final String property = getProperty(REPLAY_STREAM_PROP_NAME);
         if (isEmpty(property))
@@ -239,17 +239,17 @@ final class AeronUtil
         return Integer.parseInt(property);
     }
 
-    static boolean embeddedMediaDriver()
+    public static boolean embeddedMediaDriver()
     {
         return getBoolean(EMBEDDED_MEDIA_DRIVER_PROP_NAME);
     }
 
-    static IdleStrategy idleStrategy()
+    public static IdleStrategy idleStrategy()
     {
         return Configuration.newIdleStrategy(getProperty(IDLE_STRATEGY_PROP_NAME));
     }
 
-    static MediaDriver launchEmbeddedMediaDriverIfConfigured()
+    public static MediaDriver launchEmbeddedMediaDriverIfConfigured()
     {
         if (embeddedMediaDriver())
         {
@@ -261,12 +261,12 @@ final class AeronUtil
         return null;
     }
 
-    static ArchivingMediaDriver launchArchivingMediaDriver()
+    public static ArchivingMediaDriver launchArchivingMediaDriver()
     {
         return embeddedMediaDriver() ? launchArchiveWithEmbeddedDriver() : launchArchiveWithStandaloneDriver();
     }
 
-    static long awaitRecordingStart(final Aeron aeron, final int publicationSessionId, final long archiveId)
+    public static long awaitRecordingStart(final Aeron aeron, final int publicationSessionId, final long archiveId)
     {
         final CountersReader counters = aeron.countersReader();
         int counterId;
@@ -279,7 +279,7 @@ final class AeronUtil
         return getRecordingId(counters, counterId);
     }
 
-    static long findLastRecordingId(
+    public static long findLastRecordingId(
         final AeronArchive aeronArchive, final String recordingChannel, final int recordingStreamId)
     {
         final MutableLong lastRecordingId = new MutableLong();
@@ -312,7 +312,7 @@ final class AeronUtil
         return lastRecordingId.get();
     }
 
-    static void pipeMessages(
+    public static void pipeMessages(
         final Subscription subscription, final ExclusivePublication publication, final AtomicBoolean running)
     {
         final IdleStrategy idleStrategy = idleStrategy();
@@ -348,7 +348,7 @@ final class AeronUtil
         }
     }
 
-    static int sendMessages(
+    public static int sendMessages(
         final ExclusivePublication publication,
         final BufferClaim bufferClaim,
         final int numberOfMessages,
@@ -387,12 +387,12 @@ final class AeronUtil
         return count;
     }
 
-    static void installSignalHandler(final Runnable onSignal)
+    public static void installSignalHandler(final Runnable onSignal)
     {
         SigInt.register(onSignal);
     }
 
-    static void yieldUninterruptedly()
+    public static void yieldUninterruptedly()
     {
         Thread.yield();
         if (Thread.currentThread().isInterrupted())
@@ -401,7 +401,7 @@ final class AeronUtil
         }
     }
 
-    static long replayFullRecording(
+    public static long replayFullRecording(
         final AeronArchive aeronArchive, final long recordingId, final String replayChannel, final int replayStreamId)
     {
         while (true)
@@ -418,7 +418,10 @@ final class AeronUtil
         }
     }
 
-    static void awaitConnected(final BooleanSupplier connection, final long connectionTimeoutNs, final NanoClock clock)
+    public static void awaitConnected(
+        final BooleanSupplier connection,
+        final long connectionTimeoutNs,
+        final NanoClock clock)
     {
         final long deadlineNs = clock.nanoTime() + connectionTimeoutNs;
         while (!connection.getAsBoolean())
@@ -434,7 +437,7 @@ final class AeronUtil
         }
     }
 
-    static void checkPublicationResult(final long result)
+    public static void checkPublicationResult(final long result)
     {
         if (result == CLOSED ||
             result == NOT_CONNECTED ||
@@ -444,7 +447,7 @@ final class AeronUtil
         }
     }
 
-    static ErrorHandler printingErrorHandler(final String context)
+    public static ErrorHandler printingErrorHandler(final String context)
     {
         return (Throwable throwable) ->
         {
@@ -453,7 +456,7 @@ final class AeronUtil
         };
     }
 
-    static void dumpAeronStats(final File cncFile, final Path statsFile, final Path errorFile)
+    public static void dumpAeronStats(final File cncFile, final Path statsFile, final Path errorFile)
     {
         Thread.interrupted(); // clear interrupt
         if (cncFile.exists() && cncFile.length() >= CncFileDescriptor.META_DATA_LENGTH)
@@ -496,7 +499,7 @@ final class AeronUtil
         }
     }
 
-    static void dumpArchiveErrors(final File archiveDir, final Path destFile)
+    public static void dumpArchiveErrors(final File archiveDir, final Path destFile)
     {
         Thread.interrupted(); // clear interrupt
         final File file = resolveMarkFile(archiveDir, ArchiveMarkFile.FILENAME, ArchiveMarkFile.LINK_FILENAME);
@@ -514,7 +517,7 @@ final class AeronUtil
         }
     }
 
-    static void dumpClusterErrors(
+    public static void dumpClusterErrors(
         final Path resultFile, final File clusterDir, final String markFileName, final String linkFileName)
     {
         Thread.interrupted(); // clear interrupt
@@ -533,7 +536,7 @@ final class AeronUtil
         }
     }
 
-    static File resolveMarkFile(final File parentDir, final String markFileName, final String linkFileName)
+    public static File resolveMarkFile(final File parentDir, final String markFileName, final String linkFileName)
     {
         final File linkFile = new File(parentDir, linkFileName);
         if (linkFile.exists() && linkFile.isFile())

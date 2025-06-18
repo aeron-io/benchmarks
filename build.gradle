@@ -44,6 +44,10 @@ def toolchainCompiler = javaToolchains.compilerFor {
 }
 
 allprojects {
+    group = 'io.aeron.benchmarks'
+    version = '0.1.0-SNAPSHOT'
+
+
     repositories {
         mavenLocal()
         mavenCentral()
@@ -73,6 +77,18 @@ subprojects {
     apply plugin: 'checkstyle'
 
     checkstyle.toolVersion = libs.versions.checkstyle.get()
+
+    apply plugin: 'maven-publish'
+
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+                artifactId = project.name
+            }
+        }
+    }
 
     dependencies {
         testImplementation platform("org.junit:junit-bom:${libs.versions.junit.get()}")

@@ -268,7 +268,7 @@ function start_cluster_node()
     -Dio.aeron.benchmarks.aeron.cluster.service=${cluster_service} \
     -Dio.aeron.benchmarks.output.directory=${output_dir} \
     ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"cluster-node-${node_id}\" \
-    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/cluster-node & \
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/sequencer-node & \
     $(await_java_process_start "${cluster_node_class_name}") \
     ; $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}") \
     ; $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}") \
@@ -331,7 +331,7 @@ function start_cluster_backup_node()
     -Daeron.archive.control.stream.id=110 \
     -Daeron.archive.control.response.stream.id=120 \
     -Dio.aeron.benchmarks.output.directory=${output_dir}\" PROCESS_FILE_NAME=\"cluster-backup-node-${node_id}\"\
-    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/cluster-backup-node & \
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/sequencer-backup-node & \
     $(await_java_process_start "${cluster_backup_node_class_name}") \
     ; $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}") \
     ; $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}") \
@@ -472,7 +472,7 @@ do
       client_driver="${client_driver//driver_aeron_dpdk_gateway_ipv4_address_var/${CLIENT_AERON_DPDK_GATEWAY_IPV4_ADDRESS}}"
       client_driver="${client_driver//driver_aeron_dpdk_local_ipv4_address_var/${CLIENT_AERON_DPDK_LOCAL_IPV4_ADDRESS}}"
 
-      client_script="${CLIENT_SCRIPT:-cluster-client}"
+      client_script="${CLIENT_SCRIPT:-sequencer-client}"
       client_class_name="${CLIENT_CLASS_NAME:-io.aeron.benchmarks.LoadTestRig}"
       cluster_node_class_name="io.aeron.benchmarks.aeron.ClusterNode"
       cluster_backup_node_class_name="io.aeron.benchmarks.aeron.ClusterBackupNode"
