@@ -264,57 +264,28 @@ do
         client_interface="|interface=${CLIENT_INTERFACE}"
       fi
 
-      start_client="set -e
-        export JAVA_HOME=\"${CLIENT_JAVA_HOME}\"
-        export PROCESS_FILE_NAME=\"live-recording-client-media-driver\"
+      start_client="\
+      export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"live-recording-client-media-driver\"\
+      ; $(kill_java_process "${client_class_name}") \
+      ; rm -rf ${ARCHIVE_DIR} \
+      ; sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; fstrim --all \
+      ; ${client_driver} \
+      && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/live-recording-client & \
+      $(await_java_process_start "${client_class_name}") \
+      ; $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
+      ; $(pin_thread "\${pid}" "archive-recorde" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_RECORDER_CPU_CORE}") \
+      ; $(pin_thread "\${pid}" "archive-replaye" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_REPLAYER_CPU_CORE}") \
+      ; $(pin_thread "\${pid}" "archive-conduct" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_CONDUCTOR_CPU_CORE}") \
+      && tail --pid=\$! -f /dev/null && kill -9 \${media_driver_pid}; wait"
 
-        $(kill_java_process "${client_class_name}")
-
-        rm -rf ${ARCHIVE_DIR}
-
-        sync
-        echo 3 | sudo tee /proc/sys/vm/drop_caches
-        fstrim --all
-
-        ${client_driver}
-
-        numactl --membind=${CLIENT_CPU_NODE} \
-                --cpunodebind=${CLIENT_CPU_NODE} \
-                --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" \
-                ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/live-recording-client &
-
-        $(await_java_process_start "${client_class_name}")
-
-        $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")
-        $(pin_thread "\${pid}" "archive-recorde" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_RECORDER_CPU_CORE}")
-        $(pin_thread "\${pid}" "archive-replaye" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_REPLAYER_CPU_CORE}")
-        $(pin_thread "\${pid}" "archive-conduct" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_CONDUCTOR_CPU_CORE}")
-
-        tail --pid=\$! -f /dev/null
-
-        kill -9 \${media_driver_pid}
-        wait
-        "
-
-      start_server="set -e
-        export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-        export PROCESS_FILE_NAME=\"echo-node-media-driver\"
-
-        $(kill_java_process "${server_class_name}")
-
-        ${server_driver}
-
-        numactl --membind=${SERVER_CPU_NODE} \
-                --cpunodebind=${SERVER_CPU_NODE} \
-                --physcpubind=\"${SERVER_NON_ISOLATED_CPU_CORES}\" \
-                ${SERVER_BENCHMARKS_PATH}/scripts/aeron/echo-server &
-
-        $(await_java_process_start "${server_class_name}")
-
-        $(pin_thread "\${pid}" "echo" "${SERVER_ECHO_CPU_CORE}")
-
-        tail --pid=\$! -f /dev/null
-        "
+      start_server="\
+      export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"echo-node-media-driver\"\
+      ; $(kill_java_process "${server_class_name}") \
+      ; ${server_driver} \
+      && numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} --physcpubind=\"${SERVER_NON_ISOLATED_CPU_CORES}\" ${SERVER_BENCHMARKS_PATH}/scripts/aeron/echo-server & \
+      $(await_java_process_start "${server_class_name}") \
+      ; $(pin_thread "\${pid}" "echo" "${SERVER_ECHO_CPU_CORE}") \
+      && tail --pid=\$! -f /dev/null"
 
       stop_server="$(stop_java_process "${server_class_name}"); $(stop_media_driver)"
 

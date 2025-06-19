@@ -128,51 +128,26 @@ do
 
     echo -e "\n Testing scenario: '${test}'\n"
 
-    start_client="
-      set -e
-
-      export JAVA_HOME=\"${CLIENT_JAVA_HOME}\"
-      export PROCESS_FILE_NAME=\"kafka-client\"
-
-      $(kill_java_process "io.aeron.benchmarks.LoadTestRig")
-
-      numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} \
-        ${onload} ${CLIENT_BENCHMARKS_PATH}/scripts/kafka/client &
-
-      $(await_java_process_start \"io.aeron.benchmarks.LoadTestRig\")
-
-      $(pin_thread \"\${pid}\" \"load-test-rig\" \"${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}\")
-
-      tail --pid=\$! -f /dev/null
-      "
+    start_client="export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" \
+    ; $(kill_java_process "io.aeron.benchmarks.LoadTestRig") \
+      ; numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} ${onload} ${CLIENT_BENCHMARKS_PATH}/scripts/kafka/client &
+      $(await_java_process_start "io.aeron.benchmarks.LoadTestRig"); \
+      $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
+      && tail --pid=\$! -f /dev/null"
 
     server_scripts_path="${SERVER_BENCHMARKS_PATH}/scripts/kafka"
 
-    start_kafka="
-      set -e
+    start_kafka="cp ${server_scripts_path}/server.properties ${server_scripts_path}/server.properties.bak \
+    && echo -e \"log.dirs=${SERVER_KAFKA_DIR}/logs\n\
+    ssl.truststore.location=${SERVER_BENCHMARKS_PATH}/certificates/truststore.p12\n\
+    ssl.keystore.location=${SERVER_BENCHMARKS_PATH}/certificates/server.keystore\n\
+    advertised.listeners=PLAINTEXT://${SERVER_HOST}:${plain_text_port},SSL://${SERVER_HOST}:${ssl_port}\" >> ${server_scripts_path}/server.properties \
+    && export JAVA_HOME=\"${SERVER_JAVA_HOME}\" \
+    && numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} ${onload} ${server_scripts_path}/kafka-start"
 
-      cp ${server_scripts_path}/server.properties ${server_scripts_path}/server.properties.bak
-
-      echo -e \"log.dirs=${SERVER_KAFKA_DIR}/logs
-      ssl.truststore.location=${SERVER_BENCHMARKS_PATH}/certificates/truststore.p12
-      ssl.keystore.location=${SERVER_BENCHMARKS_PATH}/certificates/server.keystore
-      advertised.listeners=PLAINTEXT://${SERVER_HOST}:${plain_text_port},SSL://${SERVER_HOST}:${ssl_port}\" >> ${server_scripts_path}/server.properties
-
-      export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-
-      numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} \
-        ${onload} ${server_scripts_path}/kafka-start
-      "
-
-    stop_server="
-      set -e
-
-      export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-
-      KAFKA_DATA_DIR=\"${SERVER_KAFKA_DIR}\" ${server_scripts_path}/stop-all
-
-      mv ${server_scripts_path}/server.properties.bak ${server_scripts_path}/server.properties
-      "
+    stop_server="export JAVA_HOME=\"${SERVER_JAVA_HOME}\" \
+    && KAFKA_DATA_DIR=\"${SERVER_KAFKA_DIR}\" ${server_scripts_path}/stop-all; \
+    mv ${server_scripts_path}/server.properties.bak ${server_scripts_path}/server.properties"
 
     run_benchmarks \
       "${start_client}" \

@@ -123,32 +123,16 @@ do
 
   echo -e "\n Testing scenario: '${test}'\n"
 
-  start_client="
-    set -e
-    export JAVA_HOME=\"${CLIENT_JAVA_HOME}\"
-    export PROCESS_FILE_NAME=\"grpc-client\"
-
-    $(kill_java_process "io.aeron.benchmarks.LoadTestRig")
-
-    numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} \
-      ${onload} ${CLIENT_BENCHMARKS_PATH}/scripts/grpc/client &
-
-    $(await_java_process_start \"io.aeron.benchmarks.LoadTestRig\")
-
-    $(pin_thread \"\${pid}\" \"load-test-rig\" \"${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}\")
-
-    tail --pid=\$! -f /dev/null
-    "
+  start_client="export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"grpc-client\"\
+  ; $(kill_java_process "io.aeron.benchmarks.LoadTestRig") \
+  ; numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} ${onload} ${CLIENT_BENCHMARKS_PATH}/scripts/grpc/client & \
+  $(await_java_process_start "io.aeron.benchmarks.LoadTestRig"); \
+  $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
+  && tail --pid=\$! -f /dev/null"
 
   # shellcheck disable=SC2153
-  start_server="
-    set -e
-    export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-    export PROCESS_FILE_NAME=\"grpc-server\"
-
-    numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} \
-      ${onload} ${SERVER_BENCHMARKS_PATH}/scripts/grpc/server
-    "
+  start_server="export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"grpc-server\"\
+  && numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} ${onload} ${SERVER_BENCHMARKS_PATH}/scripts/grpc/server"
 
   stop_server="$(stop_java_process "io.aeron.benchmarks.grpc.EchoServer")"
 

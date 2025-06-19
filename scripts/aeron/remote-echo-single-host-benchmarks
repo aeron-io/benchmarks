@@ -183,33 +183,21 @@ function start_node()
   local extra_properties_var=NODE${node_id}_EXTRA_PROPERTIES
   local destination_channel_var=NODE${node_id}_DESTINATION_CHANNEL
   local source_channel_var=NODE${node_id}_SOURCE_CHANNEL
-  echo "set -e
-     export JAVA_HOME=\"${!java_home_var}\"
-     export PROCESS_FILE_NAME=\"echo-node-media-driver-${node_id}\"
-
-     $(kill_java_process "${server_class_name}")
-
-     ${server_driver}
-
-     export JVM_OPTS=\"\
-     -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-     -Dio.aeron.benchmarks.output.directory=${output_dir} \
-     -Dio.aeron.benchmarks.aeron.destination.channel=${!destination_channel_var} \
-     -Dio.aeron.benchmarks.aeron.source.channel=${!source_channel_var} \
-     -Dio.aeron.benchmarks.aeron.receiver.index=${node_id} \
-     ${!extra_properties_var:-}\"
-     export PROCESS_FILE_NAME=\"echo-node-${node_id}\"
-
-     numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} \
-       --physcpubind=\"${!non_isolated_cpu_cores_var}\" \
-       ${!benchmarks_path_var}/scripts/aeron/echo-server &
-
-     $(await_java_process_start "${server_class_name}")
-
-     pid=\${pid}
-     $(pin_thread "\${pid}" "echo-${node_id}" "${!echo_cpu_var}")
-
-     tail --pid=\$! -f /dev/null"
+  echo "
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"echo-node-media-driver-${node_id}\" \
+    ; $(kill_java_process "${server_class_name}") \
+    ; ${server_driver} \
+    && export JVM_OPTS=\"\
+    -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
+    -Dio.aeron.benchmarks.output.directory=${output_dir} \
+    -Dio.aeron.benchmarks.aeron.destination.channel=${!destination_channel_var} \
+    -Dio.aeron.benchmarks.aeron.source.channel=${!source_channel_var} \
+    -Dio.aeron.benchmarks.aeron.receiver.index=${node_id} \
+    ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"echo-node-${node_id}\" \
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/echo-server & \
+    $(await_java_process_start "${server_class_name}") \
+    ; $(pin_thread "\${pid}" "echo-${node_id}" "${!echo_cpu_var}") \
+    && tail --pid=\$! -f /dev/null"
 }
 
 scripts_path="benchmarks_path_var/scripts/aeron"
@@ -343,55 +331,31 @@ do
 
           output_dir="${output_dir_prefix}/${test}_length=${messageLength}_rate=${messageRate}/run-${run}"
 
-         benchmark_command="set -e
-
-           export JVM_OPTS=\"\
-           -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-           -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations} \
-           -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate} \
-           -Dio.aeron.benchmarks.iterations=${iterations} \
-           -Dio.aeron.benchmarks.message.rate=${messageRate# } \
-           -Dio.aeron.benchmarks.batch.size=${burstSize# } \
-           -Dio.aeron.benchmarks.message.length=${messageLength# } \
-           -Dio.aeron.benchmarks.output.file=${test} \
-           -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS} \
-           -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false} \
-           -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false} \
-           -Dio.aeron.benchmarks.output.directory=${BENCHMARKS_PATH}/${output_dir} \
-           -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL} \
-           -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\"
-
-           export JAVA_HOME=\"${JAVA_HOME}\"
-
-           $(kill_java_process "${client_class_name}")
-           $(kill_java_process "${server_class_name}")
-
-           ${media_driver}
-
-           numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} \
-             --physcpubind=\"${NON_ISOLATED_CPU_CORES}\" \
-             ${BENCHMARKS_PATH}/scripts/aeron/echo-server &
-
-           $(await_java_process_start "${server_class_name}")
-           echo_pid=\${pid}
-           echo \"echo_pid=\${echo_pid}\"
-
-           numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} \
-             --physcpubind=\"${NON_ISOLATED_CPU_CORES}\" \
-             ${BENCHMARKS_PATH}/scripts/aeron/echo-client &
-
-           $(await_java_process_start "${client_class_name}")
-           load_test_rig_pid=\${pid}
-           echo \"load_test_rig_pid=\${load_test_rig_pid}\"
-
-           $(pin_thread "\${echo_pid}" "echo-0" "${SERVER_ECHO_CPU_CORE}")
-           $(pin_thread "\${load_test_rig_pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")
-
-           tail --pid=\$! -f /dev/null
-           kill -9 \${echo_pid}
-           kill -9 \${media_driver_pid}
-           wait
-          "
+          benchmark_command="export JVM_OPTS=\"\
+          -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout}\
+          -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations}\
+          -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate}\
+          -Dio.aeron.benchmarks.iterations=${iterations}\
+          -Dio.aeron.benchmarks.message.rate=${messageRate# }\
+          -Dio.aeron.benchmarks.batch.size=${burstSize# }\
+          -Dio.aeron.benchmarks.message.length=${messageLength# }\
+          -Dio.aeron.benchmarks.output.file=${test}\
+          -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS}\
+          -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
+          -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
+          -Dio.aeron.benchmarks.output.directory=${BENCHMARKS_PATH}/${output_dir}\
+          -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL}\
+          -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\"\
+          && export JAVA_HOME=\"${JAVA_HOME}\"\
+          ; $(kill_java_process "${client_class_name}")\
+          ; $(kill_java_process "${server_class_name}")\
+          ; ${media_driver}\
+          && numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} --physcpubind=\"${NON_ISOLATED_CPU_CORES}\" ${BENCHMARKS_PATH}/scripts/aeron/echo-server & \
+          $(await_java_process_start "${server_class_name}"); echo_pid=\${pid}; echo \"echo_pid=\${echo_pid}\" \
+          && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${NON_ISOLATED_CPU_CORES}\" ${BENCHMARKS_PATH}/scripts/aeron/echo-client & \
+          $(await_java_process_start "${client_class_name}"); load_test_rig_pid=\${pid}; echo \"load_test_rig_pid=\${load_test_rig_pid}\" \
+          && $(pin_thread "\${echo_pid}" "echo-0" "${SERVER_ECHO_CPU_CORE}"); $(pin_thread "\${load_test_rig_pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
+          && tail --pid=\$! -f /dev/null; kill -9 \${echo_pid}; kill -9 \${media_driver_pid}; wait"
 
           echo -e "\nRunning benchmark..."
           execute_remote_command "${SSH_CLIENT_USER}" "${SSH_CLIENT_KEY_FILE}" "${SSH_CLIENT_NODE}" "${benchmark_command}; cp /dev/shm/*-gc.log \"${BENCHMARKS_PATH}/${output_dir}/logs\"; cp /dev/shm/*-crash.log \"${BENCHMARKS_PATH}/${output_dir}/logs\"; rm /dev/shm/*-gc.log; rm /dev/shm/*-crash.log; true; exit"

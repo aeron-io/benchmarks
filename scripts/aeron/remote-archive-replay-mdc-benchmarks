@@ -230,38 +230,23 @@ function start_replay_node()
   local archive_response_channel_var=NODE${node_id}_ARCHIVE_RESPONSE_CHANNEL
   local replay_channel_var=NODE${node_id}_REPLAY_CHANNEL
   echo "
-    set -e
-    export JAVA_HOME=\"${!java_home_var}\"
-    export PROCESS_FILE_NAME=\"replay-node-media-driver-${node_id}\"
-
-    $(kill_java_process "${node_class_name}")
-
-    ${server_driver}
-
-    export JVM_OPTS=\"\
-      -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-      -Dio.aeron.benchmarks.output.directory=${output_dir} \
-      -Dio.aeron.benchmarks.aeron.replay.channel=${!replay_channel_var} \
-      -Dio.aeron.benchmarks.aeron.record.channel=${RECORD_CHANNEL} \
-      -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL} \
-      -Dio.aeron.benchmarks.aeron.receiver.index=${node_id} \
-      -Daeron.archive.control.channel=${ARCHIVE_CONTROL_CHANNEL} \
-      -Daeron.archive.control.response.channel=${!archive_response_channel_var} \
-      ${!extra_properties_var:-}\"
-
-     export PROCESS_FILE_NAME=\"replay-node-${node_id}\"
-
-     numactl --membind=${!cpu_node_var} \
-             --cpunodebind=${!cpu_node_var} \
-             --physcpubind=\"${!non_isolated_cpu_cores_var}\" \
-             ${!benchmarks_path_var}/scripts/aeron/replay-node &
-
-     $(await_java_process_start "${node_class_name}")
-
-     $(pin_thread "\${pid}" "replay-${node_id}" "${!replay_cpu_var}")
-
-     tail --pid=\$! -f /dev/null
-   "
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"replay-node-media-driver-${node_id}\" \
+    ; $(kill_java_process "${node_class_name}") \
+    ; ${server_driver} \
+    && export JVM_OPTS=\"\
+    -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
+    -Dio.aeron.benchmarks.output.directory=${output_dir} \
+    -Dio.aeron.benchmarks.aeron.replay.channel=${!replay_channel_var} \
+    -Dio.aeron.benchmarks.aeron.record.channel=${RECORD_CHANNEL} \
+    -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL} \
+    -Dio.aeron.benchmarks.aeron.receiver.index=${node_id} \
+    -Daeron.archive.control.channel=${ARCHIVE_CONTROL_CHANNEL} \
+    -Daeron.archive.control.response.channel=${!archive_response_channel_var} \
+    ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"replay-node-${node_id}\" \
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/replay-node & \
+    $(await_java_process_start "${node_class_name}") \
+    ; $(pin_thread "\${pid}" "replay-${node_id}" "${!replay_cpu_var}") \
+    && tail --pid=\$! -f /dev/null"
 }
 
 scripts_path="benchmarks_path_var/scripts/aeron"
@@ -423,95 +408,60 @@ do
 
             output_dir="${output_dir_prefix}/${test}_length=${messageLength}_rate=${messageRate}/run-${run}"
 
-            start_client="set -e
-              export JVM_OPTS=\"\
-                -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-                -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations} \
-                -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate} \
-                -Dio.aeron.benchmarks.iterations=${iterations} \
-                -Dio.aeron.benchmarks.message.rate=${messageRate# } \
-                -Dio.aeron.benchmarks.batch.size=${burstSize# } \
-                -Dio.aeron.benchmarks.message.length=${messageLength# } \
-                -Dio.aeron.benchmarks.output.file=${test} \
-                -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false} \
-                -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false} \
-                -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir} \
-                -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL} \
-                -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL} \
-                -Dio.aeron.benchmarks.aeron.receiver.count=${RECEIVER_COUNT} \
-                ${CLIENT_EXTRA_PROPERTIES:-}\"
+            start_client="export JVM_OPTS=\"\
+            -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout}\
+            -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations}\
+            -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate}\
+            -Dio.aeron.benchmarks.iterations=${iterations}\
+            -Dio.aeron.benchmarks.message.rate=${messageRate# }\
+            -Dio.aeron.benchmarks.batch.size=${burstSize# }\
+            -Dio.aeron.benchmarks.message.length=${messageLength# }\
+            -Dio.aeron.benchmarks.output.file=${test}\
+            -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
+            -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
+            -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir}\
+            -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL}\
+            -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\
+            -Dio.aeron.benchmarks.aeron.receiver.count=${RECEIVER_COUNT}\
+            ${CLIENT_EXTRA_PROPERTIES:-}\"\
+            && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\"\
+            ; $(kill_java_process "${client_class_name}")\
+            ; ${client_driver}\
+            ; export PROCESS_FILE_NAME=\"echo-client\"\
+            && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/echo-client & \
+            $(await_java_process_start "${client_class_name}")\
+            ; $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")\
+            && tail --pid=\$! -f /dev/null; kill -9 \${media_driver_pid}; wait"
 
-              export JAVA_HOME=\"${CLIENT_JAVA_HOME}\"
-              export PROCESS_FILE_NAME=\"client-media-driver\"
-
-              $(kill_java_process "${client_class_name}")
-
-              ${client_driver}
-
-              export PROCESS_FILE_NAME=\"echo-client\"
-
-              numactl --membind=${CLIENT_CPU_NODE} \
-                      --cpunodebind=${CLIENT_CPU_NODE} \
-                      --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" \
-                      ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/echo-client &
-
-              $(await_java_process_start "${client_class_name}")
-
-              $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")
-
-              tail --pid=\$! -f /dev/null
-
-              kill -9 \${media_driver_pid}
-              wait
-              "
-
-          start_server="set -e
-            export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-            export PROCESS_FILE_NAME=\"archive-node-media-driver\"
-
-            $(kill_java_process "${server_class_name}")
-
-            rm -rf ${ARCHIVE_DIR}
-
-            sync
-            echo 3 | sudo tee /proc/sys/vm/drop_caches
-            sudo fstrim --all
-
-            ${server_driver}
-
-            export JAVA_HOME=\"${SERVER_JAVA_HOME}\"
-            export PROCESS_FILE_NAME=\"archive-node\"
-            export JVM_OPTS=\"\
-              -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-              -Dio.aeron.benchmarks.output.directory=${SERVER_BENCHMARKS_PATH}/${output_dir} \
-              -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL} \
-              -Dio.aeron.benchmarks.aeron.record.channel=${RECORD_CHANNEL} \
-              -Daeron.archive.control.channel=${ARCHIVE_CONTROL_CHANNEL} \
-              -Daeron.archive.control.response.channel=${ARCHIVE_RESPONSE_CHANNEL} \
-              -Daeron.archive.replication.channel=${ARCHIVE_REPLICATION_CHANNEL} \
-              -Daeron.archive.id=179 \
-              -Daeron.archive.dir=${ARCHIVE_DIR} \
-              -Daeron.archive.mark.file.dir=/dev/shm/aeron \
-              -Daeron.archive.file.sync.level=${fsync} \
-              -Daeron.archive.catalog.file.sync.level=${fsync} \
-              -Daeron.archive.max.concurrent.replays=$((2 * RECEIVER_COUNT)) \
-              -Daeron.archive.max.concurrent.recordings=$((2 * RECEIVER_COUNT)) \
-              -Daeron.archive.recording.events.enabled=false\"
-
-            numactl --membind=${SERVER_CPU_NODE} \
-                    --cpunodebind=${SERVER_CPU_NODE} \
-                    --physcpubind=\"${SERVER_NON_ISOLATED_CPU_CORES}\" \
-                    ${SERVER_BENCHMARKS_PATH}/scripts/aeron/archive-node &
-
-            $(await_java_process_start "${server_class_name}")
-
-            $(pin_thread "\${pid}" "archive-recorde" "${SERVER_ARCHIVE_RECORDER_CPU_CORE}")
-            $(pin_thread "\${pid}" "archive-replaye" "${SERVER_ARCHIVE_REPLAYER_CPU_CORE}")
-            $(pin_thread "\${pid}" "archive-conduct" "${SERVER_ARCHIVE_CONDUCTOR_CPU_CORE}")
-            $(pin_thread "\${pid}" "archive-node" "${SERVER_ARCHIVE_NODE_CPU_CORE}")
-
-            tail --pid=\$! -f /dev/null
-            "
+            start_server="export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node-media-driver\"\
+            ; $(kill_java_process "${server_class_name}") \
+            ; rm -rf ${ARCHIVE_DIR} \
+            ; sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; sudo fstrim --all \
+            ; ${server_driver} \
+            && export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node\" \
+            JVM_OPTS=\"\
+            -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout}\
+            -Dio.aeron.benchmarks.output.directory=${SERVER_BENCHMARKS_PATH}/${output_dir} \
+            -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL} \
+            -Dio.aeron.benchmarks.aeron.record.channel=${RECORD_CHANNEL} \
+            -Daeron.archive.control.channel=${ARCHIVE_CONTROL_CHANNEL} \
+            -Daeron.archive.control.response.channel=${ARCHIVE_RESPONSE_CHANNEL} \
+            -Daeron.archive.replication.channel=${ARCHIVE_REPLICATION_CHANNEL} \
+            -Daeron.archive.id=179 \
+            -Daeron.archive.dir=${ARCHIVE_DIR} \
+            -Daeron.archive.mark.file.dir=/dev/shm/aeron \
+            -Daeron.archive.file.sync.level=${fsync} \
+            -Daeron.archive.catalog.file.sync.level=${fsync} \
+            -Daeron.archive.max.concurrent.replays=$((2 * RECEIVER_COUNT)) \
+            -Daeron.archive.max.concurrent.recordings=$((2 * RECEIVER_COUNT)) \
+            -Daeron.archive.recording.events.enabled=false\" \
+            ; numactl --membind=${SERVER_CPU_NODE} --cpunodebind=${SERVER_CPU_NODE} --physcpubind=\"${SERVER_NON_ISOLATED_CPU_CORES}\" ${SERVER_BENCHMARKS_PATH}/scripts/aeron/archive-node & \
+            $(await_java_process_start "${server_class_name}") \
+            ; $(pin_thread "\${pid}" "archive-recorde" "${SERVER_ARCHIVE_RECORDER_CPU_CORE}") \
+            ; $(pin_thread "\${pid}" "archive-replaye" "${SERVER_ARCHIVE_REPLAYER_CPU_CORE}") \
+            ; $(pin_thread "\${pid}" "archive-conduct" "${SERVER_ARCHIVE_CONDUCTOR_CPU_CORE}") \
+            ; $(pin_thread "\${pid}" "archive-node" "${SERVER_ARCHIVE_NODE_CPU_CORE}") \
+            && tail --pid=\$! -f /dev/null"
 
             stop_server="$(stop_java_process "${server_class_name}"); $(stop_media_driver)"
 

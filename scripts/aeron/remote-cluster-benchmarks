@@ -234,23 +234,14 @@ function start_cluster_node()
   local consensus_module_cpu_var=NODE${node_id}_CONSENSUS_MODULE_CPU_CORE
   local clustered_service_cpu_var=NODE${node_id}_CLUSTERED_SERVICE_CPU_CORE
   local extra_properties_var=NODE${node_id}_EXTRA_PROPERTIES
-  echo "set -e
-
-    export JAVA_HOME=\"${!java_home_var}\"
-    export PROCESS_FILE_NAME=\"cluster-node-${node_id}-media-driver\"
-
-    $(kill_java_process "${cluster_node_class_name}")
-
-    rm -rf \"${!cluster_dir_var}\"
-    rm -rf \"${!archive_dir_var}\"
-
-    sync
-    echo 3 | sudo tee /proc/sys/vm/drop_caches
-    fstrim --all
-
-    ${server_driver}
-
-    export JVM_OPTS=\"\
+  echo "
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"cluster-node-${node_id}-media-driver\" \
+    ; $(kill_java_process "${cluster_node_class_name}") \
+    ; rm -rf \"${!cluster_dir_var}\" \
+    ; rm -rf \"${!archive_dir_var}\" \
+    ; sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; fstrim --all \
+    ; ${server_driver} \
+    && export JVM_OPTS=\"\
     -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
     -Daeron.cluster.dir=${!cluster_dir_var} \
     -Daeron.cluster.idle.strategy=noop \
@@ -276,24 +267,15 @@ function start_cluster_node()
     -Daeron.archive.control.response.stream.id=120 \
     -Dio.aeron.benchmarks.aeron.cluster.service=${cluster_service} \
     -Dio.aeron.benchmarks.output.directory=${output_dir} \
-    ${!extra_properties_var:-}\"
-
-    export PROCESS_FILE_NAME=\"cluster-node-${node_id}\"
-
-    numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} \
-      --physcpubind=\"${!non_isolated_cpu_cores_var}\" \
-      ${!benchmarks_path_var}/scripts/aeron/cluster-node &
-
-    $(await_java_process_start "${cluster_node_class_name}")
-
-    pid=\${pid}
-    $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}")
-    $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}")
-    $(pin_thread "\${pid}" "archive-conduct" "${!archive_conductor_cpu_var}")
-    $(pin_thread "\${pid}" "consensus-modul" "${!consensus_module_cpu_var}")
-    $(pin_thread "\${pid}" "echo-service" "${!clustered_service_cpu_var}")
-
-    tail --pid=\$! -f /dev/null"
+    ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"cluster-node-${node_id}\" \
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/cluster-node & \
+    $(await_java_process_start "${cluster_node_class_name}") \
+    ; $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}") \
+    ; $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}") \
+    ; $(pin_thread "\${pid}" "archive-conduct" "${!archive_conductor_cpu_var}") \
+    ; $(pin_thread "\${pid}" "consensus-modul" "${!consensus_module_cpu_var}") \
+    ; $(pin_thread "\${pid}" "echo-service" "${!clustered_service_cpu_var}") \
+    && tail --pid=\$! -f /dev/null"
 }
 
 function start_cluster_backup_node()
@@ -319,22 +301,14 @@ function start_cluster_backup_node()
   local archive_replayer_cpu_var=BACKUP_NODE${node_id}_ARCHIVE_REPLAYER_CPU_CORE
   local archive_conductor_cpu_var=BACKUP_NODE${node_id}_ARCHIVE_CONDUCTOR_CPU_CORE
   local cluster_backup_cpu_var=BACKUP_NODE${node_id}_CLUSTER_BACKUP_CPU_CORE
-  echo "set -e
-    export JAVA_HOME=\"${!java_home_var}\"
-    export PROCESS_FILE_NAME=\"cluster-backup-node-${node_id}-media-driver\"
-
-    $(kill_java_process "${cluster_backup_node_class_name}")
-
-    rm -rf \"${!cluster_dir_var}\"
-    rm -rf \"${!archive_dir_var}\"
-
-    sync
-    echo 3 | sudo tee /proc/sys/vm/drop_caches
-    fstrim --all
-
-    ${server_driver}
-
-    export JVM_OPTS=\"\
+  echo "
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"cluster-backup-node-${node_id}-media-driver\" \
+    ; $(kill_java_process "${cluster_backup_node_class_name}") \
+    ; rm -rf \"${!cluster_dir_var}\" \
+    ; rm -rf \"${!archive_dir_var}\" \
+    ; sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; fstrim --all \
+    ; ${server_driver} \
+    && export JVM_OPTS=\"\
     -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
     -Daeron.cluster.dir=${!cluster_dir_var} \
     -Daeron.cluster.id=${CLUSTER_ID} \
@@ -356,23 +330,14 @@ function start_cluster_backup_node()
     -Daeron.archive.local.control.stream.id=110 \
     -Daeron.archive.control.stream.id=110 \
     -Daeron.archive.control.response.stream.id=120 \
-    -Dio.aeron.benchmarks.output.directory=${output_dir}\"
-
-    export PROCESS_FILE_NAME=\"cluster-backup-node-${node_id}\"
-
-    numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} \
-      --physcpubind=\"${!non_isolated_cpu_cores_var}\" \
-      ${!benchmarks_path_var}/scripts/aeron/cluster-backup-node &
-
-    $(await_java_process_start "${cluster_backup_node_class_name}")
-
-    pid=\${pid}
-    $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}")
-    $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}")
-    $(pin_thread "\${pid}" "archive-conduct" "${!archive_conductor_cpu_var}")
-    $(pin_thread "\${pid}" "cluster-backup" "${!cluster_backup_cpu_var}")
-
-    tail --pid=\$! -f /dev/null"
+    -Dio.aeron.benchmarks.output.directory=${output_dir}\" PROCESS_FILE_NAME=\"cluster-backup-node-${node_id}\"\
+    && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/cluster-backup-node & \
+    $(await_java_process_start "${cluster_backup_node_class_name}") \
+    ; $(pin_thread "\${pid}" "archive-recorde" "${!archive_recorder_cpu_var}") \
+    ; $(pin_thread "\${pid}" "archive-replaye" "${!archive_replayer_cpu_var}") \
+    ; $(pin_thread "\${pid}" "archive-conduct" "${!archive_conductor_cpu_var}") \
+    ; $(pin_thread "\${pid}" "cluster-backup" "${!cluster_backup_cpu_var}") \
+    && tail --pid=\$! -f /dev/null"
 }
 
 scripts_path="benchmarks_path_var/scripts/aeron"
@@ -529,47 +494,31 @@ do
 
             output_dir="${output_dir_prefix}/${client_md}-vs-${server_md}_${context}_fsync=${fsync}_mtu=${mtu}_length=${messageLength}_rate=${messageRate}/run-${run}"
 
-            start_client="set -e
-              export JVM_OPTS=\"\
-              -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} \
-              -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations} \
-              -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate} \
-              -Dio.aeron.benchmarks.iterations=${iterations} \
-              -Dio.aeron.benchmarks.message.rate=${messageRate# } \
-              -Dio.aeron.benchmarks.batch.size=${burstSize# } \
-              -Dio.aeron.benchmarks.message.length=${messageLength# } \
-              -Dio.aeron.benchmarks.output.file=${test} \
-              -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS} \
-              -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false} \
-              -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false} \
-              -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir} \
-              -Daeron.cluster.ingress.channel=${CLIENT_INGRESS_CHANNEL} \
-              ${client_ingress_endpoints} \
-              -Daeron.cluster.egress.channel=${CLIENT_EGRESS_CHANNEL} \
-              -Daeron.cluster.message.timeout=300000000000 \
-              ${CLIENT_EXTRA_PROPERTIES:-}\"
-
-              export JAVA_HOME=\"${CLIENT_JAVA_HOME}\"
-              export PROCESS_FILE_NAME=\"cluster-client-media-driver\"
-
-              $(kill_java_process "${client_class_name}")
-
-              ${client_driver}
-
-              numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} \
-                --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" \
-                ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/${client_script} &
-
-              $(await_java_process_start "${client_class_name}")
-
-              pid=\${pid}
-              $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")
-
-              tail --pid=\$! -f /dev/null
-
-              kill -9 \${media_driver_pid}
-              wait
-              "
+            start_client="export JVM_OPTS=\"\
+            -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout}\
+            -Dio.aeron.benchmarks.warmup.iterations=${warmupIterations}\
+            -Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate}\
+            -Dio.aeron.benchmarks.iterations=${iterations}\
+            -Dio.aeron.benchmarks.message.rate=${messageRate# }\
+            -Dio.aeron.benchmarks.batch.size=${burstSize# }\
+            -Dio.aeron.benchmarks.message.length=${messageLength# }\
+            -Dio.aeron.benchmarks.output.file=${test}\
+            -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS}\
+            -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
+            -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
+            -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir}\
+            -Daeron.cluster.ingress.channel=${CLIENT_INGRESS_CHANNEL}\
+            ${client_ingress_endpoints}\
+            -Daeron.cluster.egress.channel=${CLIENT_EGRESS_CHANNEL}\
+            -Daeron.cluster.message.timeout=300000000000\
+            ${CLIENT_EXTRA_PROPERTIES:-}\"\
+            && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"cluster-client-media-driver\"\
+            ; $(kill_java_process "${client_class_name}")\
+            ; ${client_driver}\
+            && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/${client_script} & \
+            $(await_java_process_start "${client_class_name}")\
+            ; $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")\
+            && tail --pid=\$! -f /dev/null; kill -9 \${media_driver_pid}; wait"
 
             for (( n=0; n<CLUSTER_BACKUP_NODES; n++ ))
             do
