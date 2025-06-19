@@ -187,9 +187,25 @@ function pin_thread()
   local pid=${1}
   local thread_name=${2}
   local core=${3}
-  local tid="\$(ps Ho tid,comm -p ${pid} | awk '/${thread_name}/{print \$1}' | head -1)"
-  echo "echo 'Pinning thread: $thread_name'; tid=${tid}; while [ -z \"\${tid}\" ]; do sleep 0.1; tid=${tid}; done; echo \"tid_${thread_name}='\${tid}'\"; taskset -p -c ${core} \${tid}"
+  local tid_cmd="\$(ps Ho tid,comm -p ${pid} | awk '/${thread_name}/{print \$1}' | head -1)"
+  echo "
+    echo 'Pinning thread: ${thread_name}'
+    count=0
+    tid=${tid_cmd}
+    while [ -z \"\${tid}\" ] && [ \${count} -lt 600 ]; do
+      sleep 0.1
+      tid=${tid_cmd}
+      count=\$((count + 1))
+    done
+    if [ -z \"\${tid}\" ]; then
+      echo 'Timeout: thread ${thread_name} not found after 60 seconds.'
+      exit 1
+    fi
+    echo \"tid_${thread_name}='\${tid}'\"
+    taskset -p -c ${core} \${tid}
+  "
 }
+
 
 function kill_java_process()
 {
