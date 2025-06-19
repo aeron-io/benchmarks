@@ -189,6 +189,7 @@ function pin_thread()
   local core=${3}
   local tid_cmd="\$(ps Ho tid,comm -p ${pid} | awk '/${thread_name}/{print \$1}' | head -1)"
   echo "
+    set -e
     echo 'Pinning thread: ${thread_name}'
     count=0
     tid=${tid_cmd}
