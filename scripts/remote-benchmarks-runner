@@ -179,7 +179,7 @@ function await_process_start()
       count=\$((count + 1));
     done;
     if [ -z \"\${pid}\" ]; then
-       echo 'Timeout: process not found after 60 seconds.';
+       echo 'Timeout: process not found after 60 seconds for command: ${pid_cmd}';
        exit 1;
     fi;
     echo \"pid='\${pid}'\"
