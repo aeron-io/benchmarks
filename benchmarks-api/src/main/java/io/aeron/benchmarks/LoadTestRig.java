@@ -24,6 +24,7 @@ import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.agrona.concurrent.SystemNanoClock;
 
 import java.io.PrintStream;
+import java.lang.invoke.VarHandle;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -121,6 +122,17 @@ public final class LoadTestRig
         try
         {
             messageTransceiver.init(configuration);
+
+            // To ensure that the creation of the threads isn't reordered with setting the thread-name. Otherwise
+            // in theory you could end up with threads getting the same affinity as the LoadTestRig.
+            VarHandle.fullFence();
+
+            // wait for all background threads to be started before pinning the main thread to a dedicated core
+            // The thread name is set after the messageTransceiver init is called to ensure that all threads
+            // are created before setting the thread name, otherwise you could end up with thread inheriting the
+            // thread-affinity of the LoadTestRig-thread.
+            Thread.currentThread().setName("load-test-rig");
+
             if (configuration.warmupIterations() > 0)
             {
                 out.printf("%nRunning warmup for %,d iterations of %,d messages each, with %,d bytes payload and a" +
@@ -347,8 +359,6 @@ public final class LoadTestRig
 
         final LoadTestRig loadTestRig = new LoadTestRig(Configuration.fromSystemProperties());
 
-        // wait for all background threads to be started before pinning the main thread to a dedicated core
-        Thread.currentThread().setName("load-test-rig");
         loadTestRig.run();
     }
 
