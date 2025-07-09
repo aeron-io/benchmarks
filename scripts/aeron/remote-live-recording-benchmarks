@@ -276,7 +276,7 @@ do
       ; $(pin_thread "\${pid}" "archive-recorde" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_RECORDER_CPU_CORE}") \
       ; $(pin_thread "\${pid}" "archive-replaye" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_REPLAYER_CPU_CORE}") \
       ; $(pin_thread "\${pid}" "archive-conduct" "${CLIENT_LOAD_TEST_RIG_ARCHIVE_CONDUCTOR_CPU_CORE}") \
-      && tail --pid=\$! -f /dev/null && kill -9 \${media_driver_pid}; wait"
+      && tail --pid=\$! -f /dev/null && kill -SIGTERM \${media_driver_pid}; wait"
 
       start_server="\
       export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"echo-node-media-driver\"\

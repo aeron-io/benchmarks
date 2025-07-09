@@ -355,7 +355,7 @@ do
           && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${NON_ISOLATED_CPU_CORES}\" ${BENCHMARKS_PATH}/scripts/aeron/echo-client & \
           $(await_java_process_start "${client_class_name}"); load_test_rig_pid=\${pid}; echo \"load_test_rig_pid=\${load_test_rig_pid}\" \
           && $(pin_thread "\${echo_pid}" "echo-0" "${SERVER_ECHO_CPU_CORE}"); $(pin_thread "\${load_test_rig_pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
-          && tail --pid=\$! -f /dev/null; kill -9 \${echo_pid}; kill -9 \${media_driver_pid}; wait"
+          && tail --pid=\$! -f /dev/null; kill -SIGTERM \${echo_pid}; kill -9 \${media_driver_pid}; wait"
 
           echo -e "\nRunning benchmark..."
           execute_remote_command "${SSH_CLIENT_USER}" "${SSH_CLIENT_KEY_FILE}" "${SSH_CLIENT_NODE}" "${benchmark_command}; cp /dev/shm/*-gc.log \"${BENCHMARKS_PATH}/${output_dir}/logs\"; cp /dev/shm/*-crash.log \"${BENCHMARKS_PATH}/${output_dir}/logs\"; rm /dev/shm/*-gc.log; rm /dev/shm/*-crash.log; true; exit"

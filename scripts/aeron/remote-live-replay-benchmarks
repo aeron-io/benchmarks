@@ -271,7 +271,7 @@ do
       && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/live-replay-client & \
       $(await_java_process_start "${client_class_name}") \
       ; $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}") \
-      && tail --pid=\$! -f /dev/null && kill -9 \${media_driver_pid}; wait"
+      && tail --pid=\$! -f /dev/null && kill -SIGTERM \${media_driver_pid}; wait"
 
       start_server="\
       export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node-media-driver\" \

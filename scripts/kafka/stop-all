@@ -27,7 +27,7 @@ killJavaProcess() {
     if [[ -z "${pid}" ]]; then
       echo "${name} is not running"
     else
-      kill -9 "${pid}"
+      kill -SIGTERM "${pid}"
     fi
 }
 

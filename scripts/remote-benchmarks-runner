@@ -230,7 +230,7 @@ function pin_thread()
 function kill_java_process()
 {
   local class_name=${1}
-  echo "kill -9 $(find_java_process "${class_name}")"
+  echo "kill -SIGTERM $(find_java_process "${class_name}")"
 }
 
 function stop_java_process()
