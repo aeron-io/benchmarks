@@ -296,6 +296,7 @@ tasks.register('deployTar', Tar) {
     from(cDriverDpdkTree)
     from(cDriverAtsTree)
     from(cDriverEfviTree)
+    archiveFileName = 'benchmarks.tar'
 }
 
 tasks.register('copyTestLogs', Copy) {
