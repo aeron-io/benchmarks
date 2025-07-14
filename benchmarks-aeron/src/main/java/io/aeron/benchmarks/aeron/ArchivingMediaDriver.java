@@ -22,7 +22,7 @@ import org.agrona.CloseHelper;
 import org.agrona.ErrorHandler;
 import org.agrona.concurrent.status.AtomicCounter;
 
-final class ArchivingMediaDriver implements AutoCloseable
+public final class ArchivingMediaDriver implements AutoCloseable
 {
     final MediaDriver driver;
     final Archive archive;
@@ -38,12 +38,12 @@ final class ArchivingMediaDriver implements AutoCloseable
         CloseHelper.closeAll(archive, driver);
     }
 
-    static ArchivingMediaDriver launchArchiveWithStandaloneDriver()
+    public static ArchivingMediaDriver launchArchiveWithStandaloneDriver()
     {
         return new ArchivingMediaDriver(null, Archive.launch(new Archive.Context().deleteArchiveOnStart(true)));
     }
 
-    static ArchivingMediaDriver launchArchiveWithEmbeddedDriver()
+    public static ArchivingMediaDriver launchArchiveWithEmbeddedDriver()
     {
         MediaDriver driver = null;
         Archive archive = null;
