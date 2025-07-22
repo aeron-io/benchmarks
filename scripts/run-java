@@ -57,8 +57,13 @@ then
   unset IFS;
 fi
 
+classpath=""
+for jar in "$DIR/../benchmarks-all/build/libs"/*.jar; do
+    classpath="${classpath:+$classpath:}$jar"
+done
+
 exec "${JAVA_HOME}/bin/java" \
-  -cp "${DIR}/../benchmarks-all/build/libs/benchmarks.jar" \
+  -cp "${classpath}"\
   "${java_options[@]}" \
   "${add_opens[@]}" \
   "${jvm_opts[@]}" \
