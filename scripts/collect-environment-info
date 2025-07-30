@@ -57,7 +57,8 @@ fi
 OPENSSL_VERSION=$(openssl version)
 
 TOPO=$(lstopo --of txt)
-TOPO_JSON=$(jq -n --arg topo "$TOPO" '{ topology: $topo }')
+TOPO_XML=$(lstopo --of xml)
+TOPO_JSON=$(jq -n --arg topo "$TOPO" --arg topo_xml "$TOPO_XML" '{ topology: $topo, "topology-xml": $topo_xml }')
 
 JSON_SUMMARY=$( jq -n \
                   --arg manufacturer "$MANUFACTURER" \
