@@ -117,6 +117,8 @@ server_drivers=()
 declare -A drivers
 drivers=(['java']='' ['java-onload']='' ['c']='' ['c-onload']='' ['c-ef-vi']='' ['c-dpdk']='' ['c-ats']='' ['c-ats-onload']='' ['c-ats-ef-vi']='' ['c-ats-dpdk']='')
 cluster_service="${CLUSTER_SERVICE:-echo}"
+download_dir="${DIR}/.."
+
 
 while [[ $# -gt 0 ]]
 do
@@ -159,8 +161,13 @@ do
     shift
     shift
     ;;
+  --download-dir)
+    download_dir="${2}"
+    shift
+    shift
+    ;;
   -h | --help)
-    echo "${0} --client-drivers \"client-media-drivers-list-csv\" --server-drivers \"server-media-drivers-list-csv\" [--context \"\$context\"] [--onload \"\$onload_command\"] [--file-sync-level \"\${file-sync-level-csv}\"] [--mtu \"\$mtu-csv\"]\
+    echo "${0} --client-drivers \"client-media-drivers-list-csv\" --server-drivers \"server-media-drivers-list-csv\" [--context \"\$context\"] [--onload \"\$onload_command\"] [--file-sync-level \"\${file-sync-level-csv}\"] [--mtu \"\$mtu-csv\"]  [--download-dir \"\$download_dir\"]\
           the support media drivers are: ${!drivers[*]}"
     exit
     ;;
@@ -630,7 +637,7 @@ do
   server_benchmarks_path=BACKUP_NODE${n}_BENCHMARKS_PATH
   server_java_home=BACKUP_NODE${n}_JAVA_HOME
   collect_environment_info "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/scripts" "${!server_benchmarks_path}/${output_dir_prefix}" "${!server_java_home}"
-  download_results "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/${output_dir_prefix}" "${DIR}/.." "${test_dir}-backup-node-${n}"
+  download_results "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/${output_dir_prefix}" "${download_dir}" "${test_dir}-backup-node-${n}"
 done
 
 for (( n=0; n<CLUSTER_SIZE; n++ ))
@@ -642,8 +649,8 @@ do
   server_benchmarks_path=NODE${n}_BENCHMARKS_PATH
   server_java_home=NODE${n}_JAVA_HOME
   collect_environment_info "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/scripts" "${!server_benchmarks_path}/${output_dir_prefix}" "${!server_java_home}"
-  download_results "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/${output_dir_prefix}" "${DIR}/.." "${test_dir}-node-${n}"
+  download_results "${!ssh_user}" "${!ssh_key_file}" "${!ssh_node}" "${!server_benchmarks_path}/${output_dir_prefix}" "${download_dir}" "${test_dir}-node-${n}"
 done
 
 collect_environment_info "${SSH_CLIENT_USER}" "${SSH_CLIENT_KEY_FILE}" "${SSH_CLIENT_NODE}" "${CLIENT_BENCHMARKS_PATH}/scripts" "${CLIENT_BENCHMARKS_PATH}/${output_dir_prefix}" "${CLIENT_JAVA_HOME}"
-download_results "${SSH_CLIENT_USER}" "${SSH_CLIENT_KEY_FILE}" "${SSH_CLIENT_NODE}" "${CLIENT_BENCHMARKS_PATH}/${output_dir_prefix}" "${DIR}/.." "${test_dir}-client"
+download_results "${SSH_CLIENT_USER}" "${SSH_CLIENT_KEY_FILE}" "${SSH_CLIENT_NODE}" "${CLIENT_BENCHMARKS_PATH}/${output_dir_prefix}" "${download_dir}" "${test_dir}-client"
