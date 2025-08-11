@@ -285,6 +285,11 @@ FileTree cDriverAtsTree = (project.hasProperty('aeron.cdriver.ats.package')) ?
 
 tasks.register('deployTar', Tar) {
     dependsOn ':benchmarks-all:shadowJar'
+
+    preserveFileTimestamps = true
+    reproducibleFileOrder = false
+    useFileSystemPermissions()
+
     from(benchmarksFileTree)
     from(cDriverTree) {
         include "*/**"
