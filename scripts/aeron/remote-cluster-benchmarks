@@ -350,6 +350,7 @@ function start_cluster_backup_node()
 scripts_path="benchmarks_path_var/scripts/aeron"
 
 driver_properties="echo -e \"\
+io.aeron.benchmarks.output.directory=${output_dir}\n\
 aeron.dir=${AERON_DIR:-/dev/shm/aeron}\n\
 aeron.file.page.size=${AERON_FILE_PAGE_SIZE:-4k}\n\
 aeron.term.buffer.sparse.file=${AERON_TERM_BUFFER_SPARSE_FILE:-true}\n\
