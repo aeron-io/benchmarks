@@ -230,7 +230,7 @@ function start_replay_node()
   local archive_response_channel_var=NODE${node_id}_ARCHIVE_RESPONSE_CHANNEL
   local replay_channel_var=NODE${node_id}_REPLAY_CHANNEL
   echo "
-    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"replay-node-media-driver-${node_id}\" \
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"replay-node-media-driver-${node_id}\" OUTPUT_DIR=\"${output_dir}\"\
     ; $(kill_java_process "${node_class_name}") \
     ; ${server_driver} \
     && export JVM_OPTS=\"\
@@ -424,21 +424,21 @@ do
             -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\
             -Dio.aeron.benchmarks.aeron.receiver.count=${RECEIVER_COUNT}\
             ${CLIENT_EXTRA_PROPERTIES:-}\"\
-            && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\"\
+            && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\" OUTPUT_DIR=\"${output_dir}\" \
             ; $(kill_java_process "${client_class_name}")\
             ; ${client_driver}\
-            ; export PROCESS_FILE_NAME=\"echo-client\"\
+            ; export PROCESS_FILE_NAME=\"echo-client\" OUTPUT_DIR=\"${output_dir}\"\
             && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/echo-client & \
             $(await_java_process_start "${client_class_name}")\
             ; $(pin_thread "\${pid}" "load-test-rig" "${CLIENT_LOAD_TEST_RIG_MAIN_CPU_CORE}")\
             && tail --pid=\$! -f /dev/null; kill -SIGTERM \${media_driver_pid}; wait"
 
-            start_server="export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node-media-driver\"\
+            start_server="export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node-media-driver\" OUTPUT_DIR=\"${output_dir}\"\
             ; $(kill_java_process "${server_class_name}") \
             ; rm -rf ${ARCHIVE_DIR} \
             ; sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; sudo fstrim --all \
             ; ${server_driver} \
-            && export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node\" \
+            && export JAVA_HOME=\"${SERVER_JAVA_HOME}\" PROCESS_FILE_NAME=\"archive-node\" OUTPUT_DIR=\"${output_dir}\"\
             JVM_OPTS=\"\
             -Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout}\
             -Dio.aeron.benchmarks.output.directory=${SERVER_BENCHMARKS_PATH}/${output_dir} \

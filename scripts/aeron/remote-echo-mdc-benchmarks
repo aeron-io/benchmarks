@@ -208,7 +208,7 @@ function start_node()
   local destination_channel_var=NODE${node_id}_DESTINATION_CHANNEL
   local source_channel_var=NODE${node_id}_SOURCE_CHANNEL
   echo "
-    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"echo-node-media-driver-${node_id}\" \
+    export JAVA_HOME=\"${!java_home_var}\" PROCESS_FILE_NAME=\"echo-node-media-driver-${node_id}\" OUTPUT_DIR=\"${output_dir}\"\
     ; $(kill_java_process "${node_class_name}") \
     ; ${server_driver} \
     && export JVM_OPTS=\"\
@@ -217,7 +217,7 @@ function start_node()
     -Dio.aeron.benchmarks.aeron.destination.channel=${!destination_channel_var} \
     -Dio.aeron.benchmarks.aeron.source.channel=${!source_channel_var} \
     -Dio.aeron.benchmarks.aeron.receiver.index=${node_id} \
-    ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"echo-node-${node_id}\" \
+    ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"echo-node-${node_id}\" OUTPUT_DIR=\"${output_dir}\"\
     && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/echo-server & \
     $(await_java_process_start "${node_class_name}") \
     ; $(pin_thread "\${pid}" "echo-${node_id}" "${!echo_cpu_var}") \
@@ -387,7 +387,7 @@ do
           -Dio.aeron.benchmarks.aeron.source.channel=${CLIENT_SOURCE_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.receiver.count=${RECEIVER_COUNT}\
           ${CLIENT_EXTRA_PROPERTIES:-}\"\
-          && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\"\
+          && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\" OUTPUT_DIR=\"${output_dir}\"\
           ; $(kill_java_process "${client_class_name}")\
           ; ${client_driver}\
           && numactl --membind=${CLIENT_CPU_NODE} --cpunodebind=${CLIENT_CPU_NODE} --physcpubind=\"${CLIENT_NON_ISOLATED_CPU_CORES}\" ${CLIENT_BENCHMARKS_PATH}/scripts/aeron/echo-client & \
