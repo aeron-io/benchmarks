@@ -355,11 +355,21 @@ public final class LoadTestRig
 
     public static void main(final String[] args) throws Exception
     {
-        mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
+        try
+        {
+            mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
 
-        final LoadTestRig loadTestRig = new LoadTestRig(Configuration.fromSystemProperties());
+            final LoadTestRig loadTestRig = new LoadTestRig(Configuration.fromSystemProperties());
 
-        loadTestRig.run();
+            loadTestRig.run();
+
+            System.exit(0);
+        }
+        catch (final Throwable t)
+        {
+            System.exit(1);
+            throw t;
+        }
     }
 
     static final class SendResult
