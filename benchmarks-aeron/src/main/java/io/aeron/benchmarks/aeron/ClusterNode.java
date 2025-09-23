@@ -30,6 +30,8 @@ import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.SystemEpochClock;
 
 import java.io.File;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +64,9 @@ public final class ClusterNode
 
         final String aeronDirectoryName = archiveContext.aeronDirectoryName();
 
+        final ShutdownSignalBarrier signalBarrier = new ShutdownSignalBarrier();
+
+
         // In local tests we could be racing with the Media Driver to start.
         // Await the driver dir to exist or creating the cluster mark file will fail.
         awaitPathExists(aeronDirectoryName);
@@ -81,6 +86,8 @@ public final class ClusterNode
                 .clusterMemberId(memberId)
                 .idleStrategySupplier(idleStrategySupplier)
                 .markFileDir(new File(aeronDirectoryName));
+
+            registerSignalBarrier(ctx, signalBarrier);
 
             return ConsensusModule.launch(ctx);
         });
@@ -112,12 +119,12 @@ public final class ClusterNode
                 .idleStrategySupplier(idleStrategySupplier)
                 .markFileDir(new File(aeronDirectoryName));
 
+            registerSignalBarrier(ctx, signalBarrier);
+
             return ClusteredServiceContainer.launch(ctx);
         });
 
         IoUtil.delete(clusterDir, false);
-
-        final ShutdownSignalBarrier signalBarrier = new ShutdownSignalBarrier();
 
         try (Archive archive = Archive.launch(archiveContext);
             Component<ConsensusModule> cm = consensusModule.start();
@@ -149,6 +156,56 @@ public final class ClusterNode
                 archive.context().aeron().context().cncFile(),
                 logsDir.resolve(prefix + "aeron-stat.txt"),
                 logsDir.resolve(prefix + "errors.txt"));
+        }
+    }
+
+    private static void registerSignalBarrier(final Object ctx, final ShutdownSignalBarrier signalBarrier)
+    {
+        final Method shutdownMethod = findMethod(
+            ctx.getClass(),
+            "shutdownSignalBarrier",
+            ShutdownSignalBarrier.class
+        );
+
+        final Method terminationMethod = findMethod(
+            ctx.getClass(),
+            "terminationHook",
+            Runnable.class
+        );
+
+        if (shutdownMethod == null && terminationMethod == null)
+        {
+            throw new RuntimeException("Couldn't find shutdownSignalBarrier or terminationHook method on " +
+                ctx.getClass().getName());
+        }
+
+        try
+        {
+            if (shutdownMethod != null)
+            {
+                shutdownMethod.invoke(ctx, signalBarrier);
+            }
+
+            if (terminationMethod != null)
+            {
+                terminationMethod.invoke(ctx, (Runnable)signalBarrier::signalAll);
+            }
+        }
+        catch (final InvocationTargetException | IllegalAccessException e)
+        {
+            throw new RuntimeException("Failed to call shutdownSignalBarrier reflectively", e);
+        }
+    }
+
+    private static Method findMethod(final Class<?> clazz, final String name, final Class<?>... parameterTypes)
+    {
+        try
+        {
+            return clazz.getMethod(name, parameterTypes);
+        }
+        catch (final NoSuchMethodException e)
+        {
+            return null; // no exception propagation
         }
     }
 
