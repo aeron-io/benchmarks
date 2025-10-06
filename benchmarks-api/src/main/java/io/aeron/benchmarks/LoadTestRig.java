@@ -25,7 +25,11 @@ import org.agrona.concurrent.SystemNanoClock;
 
 import java.io.PrintStream;
 import java.lang.invoke.VarHandle;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 
@@ -50,6 +54,7 @@ public final class LoadTestRig
 {
     private static final long NANOS_PER_SECOND = SECONDS.toNanos(1);
     private static final long RECEIVE_DEADLINE_NS = SECONDS.toNanos(3);
+    private boolean logNonDeamonThreadsOnExit;
     private final Configuration configuration;
     private final MessageTransceiver messageTransceiver;
     private final PrintStream out;
@@ -182,7 +187,45 @@ public final class LoadTestRig
         {
             messageTransceiver.destroy();
             CloseHelper.close(persistedHistogram);
+            if (logNonDeamonThreadsOnExit)
+            {
+                logNonDaemonThreads();
+            }
         }
+    }
+
+    private void logNonDaemonThreads()
+    {
+        final Thread current = Thread.currentThread();
+
+        final Set<Map.Entry<Thread, StackTraceElement[]>> entries = Thread.getAllStackTraces().entrySet();
+
+        // Collect non-daemon, alive threads (excluding current)
+        final List<Thread> others = new ArrayList<Thread>();
+        for (final Map.Entry<Thread, StackTraceElement[]> entry : entries)
+        {
+            final Thread t = entry.getKey();
+            if (t != current && t.isAlive() && !t.isDaemon())
+            {
+                others.add(t);
+            }
+        }
+
+        if (others.isEmpty())
+        {
+            return;
+        }
+
+        System.out.println("=== Non-daemon threads ===");
+        for (final Thread t : others)
+        {
+            System.out.printf("\n\"%s\" id=%d state=%s%n", t.getName(), t.getId(), t.getState());
+            for (final StackTraceElement ste : t.getStackTrace())
+            {
+                System.out.println("    at " + ste);
+            }
+        }
+        System.out.println("\n=== End of thread dump ===");
     }
 
     @SuppressWarnings("MethodLength")
@@ -358,6 +401,9 @@ public final class LoadTestRig
         mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
 
         final LoadTestRig loadTestRig = new LoadTestRig(Configuration.fromSystemProperties());
+        // this field is only set when running from the main. So it won't lead to
+        // tons of logging when running unit tests
+        loadTestRig.logNonDeamonThreadsOnExit = true;
 
         loadTestRig.run();
     }
