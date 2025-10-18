@@ -23,11 +23,11 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.Properties;
 
-import static org.agrona.PropertyAction.PRESERVE;
-import static org.agrona.PropertyAction.REPLACE;
-import static io.aeron.benchmarks.grpc.GrpcConfig.getServerBuilder;
 import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
+import static io.aeron.benchmarks.grpc.GrpcConfig.getServerBuilder;
+import static org.agrona.PropertyAction.PRESERVE;
+import static org.agrona.PropertyAction.REPLACE;
 
 public class EchoServer implements AutoCloseable
 {
@@ -56,11 +56,12 @@ public class EchoServer implements AutoCloseable
     {
         mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
 
-        try (EchoServer server = new EchoServer(getServerBuilder()))
+        try (ShutdownSignalBarrier signalBarrier = new ShutdownSignalBarrier();
+            EchoServer server = new EchoServer(getServerBuilder()))
         {
             server.start();
 
-            new ShutdownSignalBarrier().await();
+            signalBarrier.await();
         }
     }
 }

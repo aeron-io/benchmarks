@@ -25,12 +25,14 @@ import io.aeron.archive.ArchiveMarkFile;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.client.ArchiveException;
 import io.aeron.archive.client.RecordingDescriptorConsumer;
+import io.aeron.benchmarks.Configuration;
 import io.aeron.cluster.service.ClusterMarkFile;
 import io.aeron.driver.MediaDriver;
 import io.aeron.exceptions.AeronException;
 import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.BitUtil;
+import org.agrona.CloseHelper;
 import org.agrona.ErrorHandler;
 import org.agrona.IoUtil;
 import org.agrona.MutableDirectBuffer;
@@ -40,17 +42,19 @@ import org.agrona.collections.MutableLong;
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
-import org.agrona.concurrent.SigInt;
+import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.errors.ErrorLogReader;
 import org.agrona.concurrent.status.CountersReader;
-import io.aeron.benchmarks.Configuration;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -64,22 +68,26 @@ import java.util.function.BooleanSupplier;
 import static io.aeron.CncFileDescriptor.createCountersMetaDataBuffer;
 import static io.aeron.CncFileDescriptor.createCountersValuesBuffer;
 import static io.aeron.CommonContext.IPC_CHANNEL;
-import static io.aeron.Publication.*;
+import static io.aeron.Publication.CLOSED;
+import static io.aeron.Publication.MAX_POSITION_EXCEEDED;
+import static io.aeron.Publication.NOT_CONNECTED;
 import static io.aeron.archive.status.RecordingPos.findCounterIdBySession;
 import static io.aeron.archive.status.RecordingPos.getRecordingId;
+import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithEmbeddedDriver;
+import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithStandaloneDriver;
 import static java.lang.Boolean.getBoolean;
 import static java.lang.Integer.getInteger;
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.System.getProperty;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.nio.file.StandardOpenOption.*;
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
+import static java.nio.file.StandardOpenOption.WRITE;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.Strings.isEmpty;
 import static org.agrona.SystemUtil.parseDuration;
 import static org.agrona.concurrent.status.CountersReader.NULL_COUNTER_ID;
-import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithEmbeddedDriver;
-import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithStandaloneDriver;
 
 public final class AeronUtil
 {
@@ -387,9 +395,58 @@ public final class AeronUtil
         return count;
     }
 
-    public static void installSignalHandler(final Runnable onSignal)
+    public static Object installSignalHandler(final Runnable onSignal)
     {
-        SigInt.register(onSignal);
+        try
+        {
+            final Class<?> signalHandlerClass =
+                Class.forName("org.agrona.concurrent.ShutdownSignalBarrier.SignalHandler");
+            final Constructor<ShutdownSignalBarrier> constructor =
+                ShutdownSignalBarrier.class.getConstructor(signalHandlerClass);
+            final Object signalHandler = Proxy.newProxyInstance(
+                signalHandlerClass.getClassLoader(),
+                new Class[]{ signalHandlerClass },
+                (proxy, method, args) ->
+                {
+                    if (method.getDeclaringClass() == Object.class)
+                    {
+                        if ("toString".equals(method.getName()))
+                        {
+                            return onSignal.toString();
+                        }
+                    }
+                    else if (method.getDeclaringClass() == signalHandlerClass)
+                    {
+                        onSignal.run();
+                    }
+                    return null;
+                });
+            return constructor.newInstance(signalHandler);
+        }
+        catch (final ReflectiveOperationException ex)
+        {
+            try
+            {
+                final Class<?> sigIntClass = Class.forName("org.agrona.concurrent.SigInt");
+                final Method method = sigIntClass.getMethod("register", Runnable.class);
+                method.invoke(null, onSignal);
+            }
+            catch (final ReflectiveOperationException ex2)
+            {
+                final RuntimeException exception = new RuntimeException(ex);
+                exception.addSuppressed(ex2);
+                throw exception;
+            }
+            return null;
+        }
+    }
+
+    public static void close(final Object closeable)
+    {
+        if (closeable instanceof AutoCloseable)
+        {
+            CloseHelper.close((AutoCloseable)closeable);
+        }
     }
 
     public static void yieldUninterruptedly()

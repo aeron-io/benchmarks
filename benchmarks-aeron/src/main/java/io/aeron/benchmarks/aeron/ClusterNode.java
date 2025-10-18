@@ -69,86 +69,93 @@ public final class ClusterNode
         final EpochClock epochClock = SystemEpochClock.INSTANCE;
         final File clusterDir = new File(ClusteredServiceContainer.Configuration.clusterDirName());
         final int memberId = ConsensusModule.Configuration.clusterMemberId();
-
         final Supplier<IdleStrategy> idleStrategySupplier = () -> BusySpinIdleStrategy.INSTANCE;
-        final Component<ConsensusModule> consensusModule = new Component<>(() ->
-        {
-            final ConsensusModule.Context ctx = new ConsensusModule.Context()
-                .errorHandler(printingErrorHandler("consensus-module"))
-                .aeronDirectoryName(aeronDirectoryName)
-                .clusterDir(clusterDir)
-                .epochClock(epochClock)
-                .clusterMemberId(memberId)
-                .idleStrategySupplier(idleStrategySupplier)
-                .markFileDir(new File(aeronDirectoryName));
-
-            return ConsensusModule.launch(ctx);
-        });
-
-        final Type type = Type.fromSystemProperty();
-        final AtomicReference<Cluster.Role> roleRef = new AtomicReference<>();
-        final int serviceId = ClusteredServiceContainer.Configuration.serviceId();
-
-        final Component<ClusteredServiceContainer> clusteredServiceContainer = new Component<>(() ->
-        {
-            final ClusteredService clusteredService;
-            if (type == Type.FAILOVER)
-            {
-                clusteredService = new FailoverClusteredService(roleRef);
-            }
-            else
-            {
-                final long snapshotSize = getSizeAsLong(SNAPSHOT_SIZE_PROP_NAME, DEFAULT_SNAPSHOT_SIZE);
-                clusteredService = new EchoClusteredService(snapshotSize);
-            }
-
-            final ClusteredServiceContainer.Context ctx = new ClusteredServiceContainer.Context()
-                .clusteredService(clusteredService)
-                .errorHandler(printingErrorHandler("service-container"))
-                .aeronDirectoryName(aeronDirectoryName)
-                .clusterDir(clusterDir)
-                .epochClock(epochClock)
-                .serviceId(serviceId)
-                .idleStrategySupplier(idleStrategySupplier)
-                .markFileDir(new File(aeronDirectoryName));
-
-            return ClusteredServiceContainer.launch(ctx);
-        });
-
-        IoUtil.delete(clusterDir, false);
 
         final ShutdownSignalBarrier signalBarrier = new ShutdownSignalBarrier();
-
-        try (Archive archive = Archive.launch(archiveContext);
-            Component<ConsensusModule> cm = consensusModule.start();
-            Component<ClusteredServiceContainer> csc = clusteredServiceContainer.start();
-            FailoverControlServer failoverControlServer = createFailoverControlServer(
-                type,
-                memberId,
-                consensusModule,
-                clusteredServiceContainer,
-                roleRef)
-        )
+        try
         {
-            signalBarrier.await();
+            final Component<ConsensusModule> consensusModule = new Component<>(() ->
+            {
+                final ConsensusModule.Context ctx = new ConsensusModule.Context()
+                    .errorHandler(printingErrorHandler("consensus-module"))
+                    .aeronDirectoryName(aeronDirectoryName)
+                    .clusterDir(clusterDir)
+                    .epochClock(epochClock)
+                    .clusterMemberId(memberId)
+                    .idleStrategySupplier(idleStrategySupplier)
+                    .markFileDir(new File(aeronDirectoryName))
+                    .terminationHook(signalBarrier::signalAll);
 
-            final String prefix = "cluster-node-" + memberId + "-";
-            AeronUtil.dumpClusterErrors(
-                logsDir.resolve(prefix + "clustered-service-errors.txt"),
-                clusterDir,
-                ClusterMarkFile.markFilenameForService(serviceId),
-                ClusterMarkFile.linkFilenameForService(serviceId));
-            AeronUtil.dumpClusterErrors(
-                logsDir.resolve(prefix + "consensus-module-errors.txt"),
-                clusterDir,
-                ClusterMarkFile.FILENAME,
-                ClusterMarkFile.LINK_FILENAME);
-            AeronUtil.dumpArchiveErrors(
-                archive.context().archiveDir(), logsDir.resolve(prefix + "archive-errors.txt"));
-            AeronUtil.dumpAeronStats(
-                archive.context().aeron().context().cncFile(),
-                logsDir.resolve(prefix + "aeron-stat.txt"),
-                logsDir.resolve(prefix + "errors.txt"));
+                return ConsensusModule.launch(ctx);
+            });
+
+            final Type type = Type.fromSystemProperty();
+            final AtomicReference<Cluster.Role> roleRef = new AtomicReference<>();
+            final int serviceId = ClusteredServiceContainer.Configuration.serviceId();
+
+            final Component<ClusteredServiceContainer> clusteredServiceContainer = new Component<>(() ->
+            {
+                final ClusteredService clusteredService;
+                if (type == Type.FAILOVER)
+                {
+                    clusteredService = new FailoverClusteredService(roleRef);
+                }
+                else
+                {
+                    final long snapshotSize = getSizeAsLong(SNAPSHOT_SIZE_PROP_NAME, DEFAULT_SNAPSHOT_SIZE);
+                    clusteredService = new EchoClusteredService(snapshotSize);
+                }
+
+                final ClusteredServiceContainer.Context ctx = new ClusteredServiceContainer.Context()
+                    .clusteredService(clusteredService)
+                    .errorHandler(printingErrorHandler("service-container"))
+                    .aeronDirectoryName(aeronDirectoryName)
+                    .clusterDir(clusterDir)
+                    .epochClock(epochClock)
+                    .serviceId(serviceId)
+                    .idleStrategySupplier(idleStrategySupplier)
+                    .markFileDir(new File(aeronDirectoryName))
+                    .terminationHook(signalBarrier::signalAll);
+
+                return ClusteredServiceContainer.launch(ctx);
+            });
+
+            IoUtil.delete(clusterDir, false);
+
+            try (Archive archive = Archive.launch(archiveContext);
+                Component<ConsensusModule> cm = consensusModule.start();
+                Component<ClusteredServiceContainer> csc = clusteredServiceContainer.start();
+                FailoverControlServer failoverControlServer = createFailoverControlServer(
+                    type,
+                    memberId,
+                    consensusModule,
+                    clusteredServiceContainer,
+                    roleRef))
+            {
+                signalBarrier.await();
+
+                final String prefix = "cluster-node-" + memberId + "-";
+                AeronUtil.dumpClusterErrors(
+                    logsDir.resolve(prefix + "clustered-service-errors.txt"),
+                    clusterDir,
+                    ClusterMarkFile.markFilenameForService(serviceId),
+                    ClusterMarkFile.linkFilenameForService(serviceId));
+                AeronUtil.dumpClusterErrors(
+                    logsDir.resolve(prefix + "consensus-module-errors.txt"),
+                    clusterDir,
+                    ClusterMarkFile.FILENAME,
+                    ClusterMarkFile.LINK_FILENAME);
+                AeronUtil.dumpArchiveErrors(
+                    archive.context().archiveDir(), logsDir.resolve(prefix + "archive-errors.txt"));
+                AeronUtil.dumpAeronStats(
+                    archive.context().aeron().context().cncFile(),
+                    logsDir.resolve(prefix + "aeron-stat.txt"),
+                    logsDir.resolve(prefix + "errors.txt"));
+            }
+        }
+        finally
+        {
+            AeronUtil.close(signalBarrier);
         }
     }
 

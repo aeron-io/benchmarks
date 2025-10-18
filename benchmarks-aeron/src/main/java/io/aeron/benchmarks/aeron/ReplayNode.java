@@ -22,12 +22,12 @@ import io.aeron.ExclusivePublication;
 import io.aeron.Image;
 import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
+import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.SystemNanoClock;
-import io.aeron.benchmarks.Configuration;
 
 import java.nio.file.Path;
 import java.util.Properties;
@@ -35,13 +35,29 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.aeron.ChannelUri.addSessionId;
 import static io.aeron.archive.client.AeronArchive.connect;
+import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
+import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
+import static io.aeron.benchmarks.aeron.AeronUtil.FRAGMENT_LIMIT;
+import static io.aeron.benchmarks.aeron.AeronUtil.RECEIVER_INDEX_OFFSET;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
+import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.findLastRecordingId;
+import static io.aeron.benchmarks.aeron.AeronUtil.idleStrategy;
+import static io.aeron.benchmarks.aeron.AeronUtil.installSignalHandler;
+import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
+import static io.aeron.benchmarks.aeron.AeronUtil.receiverIndex;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordStream;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayFullRecording;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.CloseHelper.closeAll;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
-import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
-import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 
 /**
  * Remote node which echoes original messages back to the sender.
@@ -163,20 +179,26 @@ public final class ReplayNode implements AutoCloseable, Runnable
         final int receiverIndex = receiverIndex();
 
         final AtomicBoolean running = new AtomicBoolean(true);
-        installSignalHandler(() -> running.set(false));
-
-        try (ReplayNode server = new ReplayNode(running))
+        final Object signalHandler = installSignalHandler(() -> running.set(false));
+        try
         {
-            // wait for all background threads to be started before pinning the main thread to a dedicated core
-            Thread.currentThread().setName("replay-" + receiverIndex);
+            try (ReplayNode server = new ReplayNode(running))
+            {
+                // wait for all background threads to be started before pinning the main thread to a dedicated core
+                Thread.currentThread().setName("replay-" + receiverIndex);
 
-            server.run();
+                server.run();
 
-            final String prefix = "replay-node-" + receiverIndex + "-";
-            AeronUtil.dumpAeronStats(
-                server.aeronArchive.context().aeron().context().cncFile(),
-                outputDir.resolve(prefix + "aeron-stat.txt"),
-                outputDir.resolve(prefix + "errors.txt"));
+                final String prefix = "replay-node-" + receiverIndex + "-";
+                AeronUtil.dumpAeronStats(
+                    server.aeronArchive.context().aeron().context().cncFile(),
+                    outputDir.resolve(prefix + "aeron-stat.txt"),
+                    outputDir.resolve(prefix + "errors.txt"));
+            }
+        }
+        finally
+        {
+            AeronUtil.close(signalHandler);
         }
     }
 }

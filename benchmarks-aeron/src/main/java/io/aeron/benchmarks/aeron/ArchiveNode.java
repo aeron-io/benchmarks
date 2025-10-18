@@ -19,8 +19,8 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
-import org.agrona.concurrent.SystemNanoClock;
 import io.aeron.benchmarks.Configuration;
+import org.agrona.concurrent.SystemNanoClock;
 
 import java.nio.file.Path;
 import java.util.Properties;
@@ -29,12 +29,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static io.aeron.ChannelUri.addSessionId;
 import static io.aeron.archive.client.AeronArchive.connect;
 import static io.aeron.archive.codecs.SourceLocation.LOCAL;
+import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
+import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitRecordingStart;
+import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.installSignalHandler;
+import static io.aeron.benchmarks.aeron.AeronUtil.launchArchivingMediaDriver;
+import static io.aeron.benchmarks.aeron.AeronUtil.pipeMessages;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordStream;
 import static org.agrona.CloseHelper.closeAll;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
-import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
-import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 
 /**
  * Remote node which archives received messages and replays persisted messages back to the sender.
@@ -106,24 +115,30 @@ public final class ArchiveNode implements AutoCloseable, Runnable
         final Path outputDir = Configuration.resolveLogsDir();
 
         final AtomicBoolean running = new AtomicBoolean(true);
-        installSignalHandler(() -> running.set(false));
-
-        try (ArchiveNode server = new ArchiveNode(running))
+        final Object signalHandler = installSignalHandler(() -> running.set(false));
+        try
         {
-            // wait for all background threads to be started before pinning the main thread to a dedicated core
-            Thread.currentThread().setName("archive-node");
+            try (ArchiveNode server = new ArchiveNode(running))
+            {
+                // wait for all background threads to be started before pinning the main thread to a dedicated core
+                Thread.currentThread().setName("archive-node");
 
-            server.run();
+                server.run();
 
-            final String prefix = "archive-node-";
-            AeronUtil.dumpArchiveErrors(
-                server.archivingMediaDriver.archive.context().archiveDir(),
-                outputDir.resolve(prefix + "archive-errors.txt"));
-            AeronUtil.dumpAeronStats(
-                server.archivingMediaDriver.archive.context().aeron().context().cncFile(),
-                outputDir.resolve(prefix + "aeron-stat.txt"),
-                outputDir.resolve(prefix + "errors.txt")
-            );
+                final String prefix = "archive-node-";
+                AeronUtil.dumpArchiveErrors(
+                    server.archivingMediaDriver.archive.context().archiveDir(),
+                    outputDir.resolve(prefix + "archive-errors.txt"));
+                AeronUtil.dumpAeronStats(
+                    server.archivingMediaDriver.archive.context().aeron().context().cncFile(),
+                    outputDir.resolve(prefix + "aeron-stat.txt"),
+                    outputDir.resolve(prefix + "errors.txt")
+                );
+            }
+        }
+        finally
+        {
+            AeronUtil.close(signalHandler);
         }
     }
 }
