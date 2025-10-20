@@ -346,7 +346,7 @@ do
           -Dio.aeron.benchmarks.output.directory=${BENCHMARKS_PATH}/${output_dir}\
           -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\"\
-          && export JAVA_HOME=\"${JAVA_HOME}\"\ OUTPUT_DIR=\"${BENCHMARKS_PATH}/${output_dir}\"\
+          && export JAVA_HOME=\"${JAVA_HOME}\" OUTPUT_DIR=\"${BENCHMARKS_PATH}/${output_dir}\"\
           ; $(kill_java_process "${client_class_name}")\
           ; $(kill_java_process "${server_class_name}")\
           ; ${media_driver}\
