@@ -28,11 +28,9 @@ import org.agrona.concurrent.SleepingIdleStrategy;
 import org.agrona.concurrent.SleepingMillisIdleStrategy;
 import org.agrona.concurrent.YieldingIdleStrategy;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.io.File;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Locale;
@@ -42,7 +40,9 @@ import java.util.concurrent.TimeUnit;
 import static java.lang.System.getProperty;
 import static java.lang.reflect.Modifier.isAbstract;
 import static java.lang.reflect.Modifier.isPublic;
-import static java.nio.file.Files.*;
+import static java.nio.file.Files.exists;
+import static java.nio.file.Files.isDirectory;
+import static java.nio.file.Files.isWritable;
 import static java.util.Objects.requireNonNull;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.Strings.isEmpty;
@@ -717,25 +717,9 @@ public final class Configuration
         final String path = getProperty(OUTPUT_DIRECTORY_PROP_NAME);
         Objects.requireNonNull(path, OUTPUT_DIRECTORY_PROP_NAME);
         final Path directory = Paths.get(path).resolve(LOGS_DIR);
-        if (!Files.exists(directory))
-        {
-            if (!directory.toFile().mkdirs() && !Files.exists(directory))
-            {
-                try
-                {
-                    Files.createDirectories(directory);
-                }
-                catch (final IOException e)
-                {
-                    throw new UncheckedIOException(e);
-                }
-            }
-        }
 
-        if (!Files.isDirectory(directory))
-        {
-            throw new IllegalArgumentException("logs directory path is not a directory: " + directory);
-        }
+        validateDirectory(directory, "log");
+
         return directory;
     }
 
@@ -923,51 +907,51 @@ public final class Configuration
 
     private static Path validateOutputDirectory(final Path outputDirectory)
     {
-        requireNonNull(outputDirectory, "output directory cannot be null");
-
-        if (exists(outputDirectory))
-        {
-            if (!isDirectory(outputDirectory))
-            {
-                throw new IllegalArgumentException(
-                    "output path is not a directory: " + outputDirectory.toAbsolutePath());
-            }
-
-            if (!isWritable(outputDirectory))
-            {
-                throw new IllegalArgumentException(
-                    "output directory is not writeable: " + outputDirectory.toAbsolutePath());
-            }
-        }
-        else
-        {
-            try
-            {
-                createDirectories(outputDirectory);
-            }
-            catch (final IOException e)
-            {
-                throw new IllegalArgumentException("failed to create output directory: " + outputDirectory, e);
-            }
-        }
-
+        validateDirectory(outputDirectory, "output");
         return outputDirectory.toAbsolutePath();
+    }
+
+    /**
+     * Validates that the directory is writable. Will create the directory when needed.
+     * </p>
+     * This method is thread-safe. So multiple processes can create the directory at the same
+     * time without running into a race-condition due to non atomic check-then-modify.
+     * <p/>
+     * This method doesn't make use of the Files.createDirectories method that apparently
+     * can throw FileAlreadyExistsException when creating directories by multiple concurrent
+     * processes even though the documentation states otherwise.
+     *
+     * @param directory the path of the directory.
+     * @param name a name used to create informative exceptions.
+     */
+    private static void validateDirectory(final Path directory, final String name)
+    {
+        requireNonNull(directory, name + " directory cannot be null");
+
+        final File directoryFile = directory.toFile();
+
+        if (directoryFile.mkdirs())
+        {
+            return;
+        }
+
+        if (!isDirectory(directory))
+        {
+            throw new IllegalArgumentException("failed to create " + name +
+                " directory: " + directory.toAbsolutePath());
+        }
+
+        if (!isWritable(directory))
+        {
+            throw new IllegalArgumentException(
+                name + " directory is not writeable: " + directory.toAbsolutePath());
+        }
     }
 
     private static Path resolveLogsDir(final Path outputDirectory)
     {
         final Path logsDir = outputDirectory.resolve(LOGS_DIR);
-        if (!Files.exists(logsDir))
-        {
-            try
-            {
-                return Files.createDirectory(logsDir);
-            }
-            catch (final IOException e)
-            {
-                throw new UncheckedIOException(e);
-            }
-        }
+        validateDirectory(logsDir, "log");
         return logsDir;
     }
 }

@@ -284,7 +284,7 @@ class ConfigurationTest
 
         final IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, builder::build);
 
-        assertEquals("output path is not a directory: " + outputDirectory, ex.getMessage());
+        assertEquals("failed to create output directory: " + outputDirectory, ex.getMessage());
     }
 
     @Test
@@ -621,7 +621,7 @@ class ConfigurationTest
         {
             final IllegalArgumentException exception =
                 assertThrowsExactly(IllegalArgumentException.class, Configuration::resolveLogsDir);
-            assertEquals("logs directory path is not a directory: " + file, exception.getMessage());
+            assertEquals("failed to create log directory: " + file, exception.getMessage());
         }
         finally
         {
