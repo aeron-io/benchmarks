@@ -22,14 +22,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InOrder;
 
 import java.io.File;
 import java.io.PrintStream;
 import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static java.util.concurrent.TimeUnit.*;
@@ -86,21 +83,6 @@ class LoadTestRigTest
             .outputDirectory(tempDir)
             .outputFileNamePrefix("test")
             .build();
-    }
-
-    @ParameterizedTest
-    @CsvSource({
-        "NANOSECONDS,1",
-        "MICROSECONDS,1000",
-        "MILLISECONDS,1000000",
-        "SECONDS,1000000000",
-        "MINUTES,60000000000",
-        "HOURS,3600000000000",
-        "DAYS,86400000000000",
-    })
-    void outputScaleRatio(final TimeUnit timeUnit, final double expectedScaleRatio)
-    {
-        assertEquals(expectedScaleRatio, LoadTestRig.outputScaleRatio(timeUnit), 1e-6);
     }
 
     @Test

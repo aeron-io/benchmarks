@@ -629,6 +629,21 @@ class ConfigurationTest
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "NANOSECONDS,1",
+        "MICROSECONDS,1000",
+        "MILLISECONDS,1000000",
+        "SECONDS,1000000000",
+        "MINUTES,60000000000",
+        "HOURS,3600000000000",
+        "DAYS,86400000000000",
+    })
+    void outputScaleRatio(final TimeUnit timeUnit, final double expectedScaleRatio)
+    {
+        assertEquals(expectedScaleRatio, Configuration.outputScaleRatio(timeUnit), 1e-6);
+    }
+
     private void clearConfigProperties()
     {
         Stream.of(

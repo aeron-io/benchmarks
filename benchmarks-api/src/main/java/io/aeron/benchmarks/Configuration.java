@@ -776,6 +776,26 @@ public final class Configuration
         }
     }
 
+    /**
+     * Convert time unit to histogram scaling factor, i.e. printing histogram.
+     *
+     * @param timeUnit to print histogram values in.
+     * @return scaling factor.
+     */
+    public static double outputScaleRatio(final TimeUnit timeUnit)
+    {
+        return switch (timeUnit)
+        {
+            case NANOSECONDS -> 1.0;
+            case MICROSECONDS -> 1000.0;
+            case MILLISECONDS -> 1_000_000.0;
+            case SECONDS -> 1_000_000_000.0;
+            case MINUTES -> 60 * 1_000_000_000.0;
+            case HOURS -> 60 * 60 * 1_000_000_000.0;
+            case DAYS -> 24 * 60 * 60 * 1_000_000_000.0;
+        };
+    }
+
     private static int checkValueRange(final int value, final int minValue, final int maxValue, final String propName)
     {
         if (value < minValue)

@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
+import static io.aeron.benchmarks.Configuration.outputScaleRatio;
 import static java.util.Objects.requireNonNull;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
@@ -166,9 +167,9 @@ public final class FailoverTestRig implements FailoverListener
             failoverAt = clock.nanoTime() + failoverConfiguration.failoverDelayNs();
             runTest(configuration.iterations(), configuration.messageRate());
 
-            out.printf("%nHistogram of RTT latencies in microseconds.%n");
+            out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
             final PersistedHistogram histogram = persistedHistogram;
-            histogram.outputPercentileDistribution(out, 1000.0);
+            histogram.outputPercentileDistribution(out, outputScaleRatio(configuration.outputTimeUnit()));
 
             final PersistedHistogram.Status status = OK;
             final Path histogramPath = histogram.saveToFile(
