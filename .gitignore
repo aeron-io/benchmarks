@@ -7,6 +7,7 @@ build/
 *~
 cppbuild/Release/
 cppbuild/Debug/
+cppbuild/cmake/
 benchmark.properties
 results/
 *.rsa
