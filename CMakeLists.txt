@@ -89,7 +89,7 @@ endif (NOT AERON_GIT_URL)
 
 if (NOT AERON_GIT_SHA)
     if (NOT AERON_GIT_TAG)
-        set(AERON_GIT_TAG "origin/HEAD" CACHE STRING "Tag in the Aeron git repo" FORCE)
+        set(AERON_GIT_TAG "1.49.2" CACHE STRING "Tag in the Aeron git repo" FORCE)
     endif (NOT AERON_GIT_TAG)
 
     ExternalProject_Add(
