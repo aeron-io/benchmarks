@@ -117,7 +117,7 @@ set(AERON_BINARY_DIR ${binary_dir})
 
 set(
     AERON_LIBS
-    ${AERON_BINARY_DIR}/lib/${CMAKE_CFG_INTDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}aeron_client${CMAKE_STATIC_LIBRARY_SUFFIX}
+    ${AERON_BINARY_DIR}/lib/${CMAKE_CFG_INTDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}aeron_static${CMAKE_STATIC_LIBRARY_SUFFIX}
     ${AERON_BINARY_DIR}/lib/${CMAKE_CFG_INTDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aeron_driver${CMAKE_SHARED_LIBRARY_SUFFIX}
 )
 
@@ -144,9 +144,22 @@ endif ()
 
 # all UNIX-based platform compiler flags
 if (UNIX)
-    add_compile_options(-Wall -Wpedantic -Wextra -Wno-unused-parameter)
-    #    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -DDISABLE_BOUNDS_CHECKS")
-    add_compile_options($<$<CONFIG:Release>:-Ofast>)
+    add_compile_options(-fstrict-aliasing -Wall -Wpedantic -Wextra -Wno-unused-parameter -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer)
+
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "11.0")
+        add_compile_options(-Wno-error=maybe-uninitialized)
+    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "21.0")
+        # See gtest: https://github.com/google/googletest/issues/4762
+        add_compile_options(-Wno-error=character-conversion)
+    endif ()
+
+    if (C_WARNINGS_AS_ERRORS)
+        add_compile_options($<$<COMPILE_LANGUAGE:C>:-Werror>)
+    endif (C_WARNINGS_AS_ERRORS)
+
+    if (CXX_WARNINGS_AS_ERRORS)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror>)
+    endif (CXX_WARNINGS_AS_ERRORS)
 endif ()
 
 # platform specific flags
@@ -154,30 +167,6 @@ if (APPLE)
     add_compile_options(-Wsign-compare)
     add_definitions(-DDarwin)
     add_compile_options(-Wno-deprecated-register)
-elseif (CYGWIN)
-    add_definitions(-DWIN32)
-    #add_definitions(-DGTEST_HAS_PTHREAD)
-    string(REPLACE "-std=c++11" "-std=gnu++11" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-elseif (MSVC)
-    add_definitions(-DWIN32)
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    add_definitions(-D_CRT_NONSTDC_NO_WARNINGS)
-    add_definitions(-DNOMINMAX)
-
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /Od /Zi /MP /wd4251")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /MP /wd4251")
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /MTd")
-    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /MT")
-
-    unset(CMAKE_C_STANDARD) # To avoid `/std:c11` in the compiler options
-
-    if (C_WARNINGS_AS_ERRORS)
-        add_compile_options($<$<COMPILE_LANGUAGE:C>:/WX>)
-    endif (C_WARNINGS_AS_ERRORS)
-
-    if (CXX_WARNINGS_AS_ERRORS)
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/WX>)
-    endif (CXX_WARNINGS_AS_ERRORS)
 endif ()
 
 ##########################################################
@@ -190,7 +179,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
 include_directories(${GOOGLE_BENCHMARK_SOURCE_DIR}/include)
 # Hdr Histogram
 include_directories(${HDRHISTOGRAM_SOURCE_DIR}/include/hdr)
-include_directories(${AERON_SOURCE_DIR}/aeron-client/src/main/cpp)
+include_directories(${AERON_SOURCE_DIR}/aeron-client/src/main/cpp_wrapper)
 include_directories(${AERON_SOURCE_DIR}/aeron-client/src/main/c)
 include_directories(${AERON_SOURCE_DIR}/aeron-driver/src/main/c)
 
