@@ -272,6 +272,7 @@ function start_cluster_node()
     -Daeron.archive.local.control.stream.id=110 \
     -Daeron.archive.control.stream.id=110 \
     -Daeron.archive.control.response.stream.id=120 \
+    -Daeron.archive.id=23 \
     -Dio.aeron.benchmarks.aeron.cluster.service=${cluster_service} \
     -Dio.aeron.benchmarks.output.directory=${output_dir} \
     ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"cluster-node-${node_id}\" OUTPUT_DIR=\"${output_dir}\"\
