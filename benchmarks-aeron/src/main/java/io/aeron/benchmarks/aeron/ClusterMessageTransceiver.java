@@ -32,9 +32,9 @@ import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.UnsafeBuffer;
 
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 
+import static io.aeron.benchmarks.aeron.AeronUtil.USE_TRY_CLAIM;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
 import static io.aeron.benchmarks.aeron.AeronUtil.yieldUninterruptedly;
@@ -43,16 +43,13 @@ import static org.agrona.BitUtil.SIZE_OF_LONG;
 
 public class ClusterMessageTransceiver extends MessageTransceiver implements EgressListener
 {
-    private static final boolean USE_TRY_CLAIM = Boolean.getBoolean("io.aeron.benchmarks.useTryClaim");
-
     private final BufferClaim bufferClaim = new BufferClaim();
+    private final UnsafeBuffer buffer =
+        new UnsafeBuffer(new byte[io.aeron.driver.Configuration.MAX_UDP_PAYLOAD_LENGTH]);
     private final MediaDriver mediaDriver;
     private final AeronCluster.Context aeronClusterContext;
     private Path logsDir;
     private AeronCluster aeronCluster;
-
-    // This is used for the offer path
-    private MutableDirectBuffer buffer;
 
     public ClusterMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -110,7 +107,6 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
         if (USE_TRY_CLAIM)
         {
             final BufferClaim bufferClaim = this.bufferClaim;
-
             for (int i = 0; i < numberOfMessages; i++)
             {
                 final long result = aeronCluster.tryClaim(messageLength, bufferClaim);
@@ -130,14 +126,7 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
         }
         else
         {
-            MutableDirectBuffer tmpBuffer = this.buffer;
-            if (tmpBuffer == null)
-            {
-                this.buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(messageLength));
-                tmpBuffer = this.buffer;
-            }
-
-            final MutableDirectBuffer buffer = tmpBuffer;
+            final UnsafeBuffer buffer = this.buffer;
             for (int i = 0; i < numberOfMessages; i++)
             {
                 buffer.putLong(0, timestamp, LITTLE_ENDIAN);

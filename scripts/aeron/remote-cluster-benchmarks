@@ -275,7 +275,7 @@ function start_cluster_node()
     -Daeron.archive.control.response.stream.id=120 \
     -Dio.aeron.benchmarks.aeron.cluster.service=${cluster_service} \
     -Dio.aeron.benchmarks.output.directory=${output_dir} \
-    -Dio.aeron.benchmarks.useTryClaim=${useTryClaim} \
+    -Dio.aeron.benchmarks.aeron.use.try.claim=${useTryClaim} \
     ${!extra_properties_var:-}\" PROCESS_FILE_NAME=\"cluster-node-${node_id}\" OUTPUT_DIR=\"${output_dir}\"\
     && numactl --membind=${!cpu_node_var} --cpunodebind=${!cpu_node_var} --physcpubind=\"${!non_isolated_cpu_cores_var}\" ${!benchmarks_path_var}/scripts/aeron/cluster-node & \
     $(await_java_process_start "${cluster_node_class_name}") \
@@ -516,7 +516,7 @@ do
             -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
             -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
             -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir}\
-            -Dio.aeron.benchmarks.useTryClaim=${useTryClaim}\
+            -Dio.aeron.benchmarks.aeron.use.try.claim=${useTryClaim}\
             -Daeron.cluster.ingress.channel=${CLIENT_INGRESS_CHANNEL}\
             ${client_ingress_endpoints}\
             -Daeron.cluster.egress.channel=${CLIENT_EGRESS_CHANNEL}\

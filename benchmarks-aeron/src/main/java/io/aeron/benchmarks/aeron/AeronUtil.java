@@ -120,6 +120,10 @@ public final class AeronUtil
         "io.aeron.benchmarks.aeron.cluster.failover.control.endpoints";
     public static final String FAILOVER_DELAY_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.delay";
+    public static final String USE_TRY_CLAIM_PROP_NAME = "io.aeron.benchmarks.aeron.use.try.claim";
+    public static final boolean USE_TRY_CLAIM =
+        Boolean.parseBoolean(System.getProperty(USE_TRY_CLAIM_PROP_NAME, "true"));
+
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
     private static final int SEND_ATTEMPTS = 3;
 
