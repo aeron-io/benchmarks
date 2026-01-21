@@ -16,6 +16,8 @@
 package io.aeron.benchmarks.aeron;
 
 import io.aeron.Publication;
+import io.aeron.benchmarks.Configuration;
+import io.aeron.benchmarks.MessageTransceiver;
 import io.aeron.cluster.client.AeronCluster;
 import io.aeron.cluster.client.EgressListener;
 import io.aeron.cluster.codecs.EventCode;
@@ -28,22 +30,29 @@ import org.agrona.CloseHelper;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.NanoClock;
-import io.aeron.benchmarks.Configuration;
-import io.aeron.benchmarks.MessageTransceiver;
+import org.agrona.concurrent.UnsafeBuffer;
 
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 
+import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
+import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
+import static io.aeron.benchmarks.aeron.AeronUtil.yieldUninterruptedly;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
 
 public class ClusterMessageTransceiver extends MessageTransceiver implements EgressListener
 {
+    private static final boolean USE_TRY_CLAIM = Boolean.getBoolean("io.aeron.benchmarks.useTryClaim");
+
     private final BufferClaim bufferClaim = new BufferClaim();
     private final MediaDriver mediaDriver;
     private final AeronCluster.Context aeronClusterContext;
     private Path logsDir;
     private AeronCluster aeronCluster;
+
+    // This is used for the offer path
+    private MutableDirectBuffer buffer;
 
     public ClusterMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -98,23 +107,51 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
     {
         int count = 0;
         final AeronCluster aeronCluster = this.aeronCluster;
-        final BufferClaim bufferClaim = this.bufferClaim;
-
-        for (int i = 0; i < numberOfMessages; i++)
+        if (USE_TRY_CLAIM)
         {
-            final long result = aeronCluster.tryClaim(messageLength, bufferClaim);
-            if (result < 0)
+            final BufferClaim bufferClaim = this.bufferClaim;
+
+            for (int i = 0; i < numberOfMessages; i++)
             {
-                checkPublicationResult(result);
-                break;
+                final long result = aeronCluster.tryClaim(messageLength, bufferClaim);
+                if (result < 0)
+                {
+                    checkPublicationResult(result);
+                    break;
+                }
+
+                final MutableDirectBuffer buffer = bufferClaim.buffer();
+                final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
+                buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
+                buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+                bufferClaim.commit();
+                count++;
+            }
+        }
+        else
+        {
+            MutableDirectBuffer tmpBuffer = this.buffer;
+            if (tmpBuffer == null)
+            {
+                this.buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(messageLength));
+                tmpBuffer = this.buffer;
             }
 
-            final MutableDirectBuffer buffer = bufferClaim.buffer();
-            final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
-            buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
-            buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-            bufferClaim.commit();
-            count++;
+            final MutableDirectBuffer buffer = tmpBuffer;
+            for (int i = 0; i < numberOfMessages; i++)
+            {
+                buffer.putLong(0, timestamp, LITTLE_ENDIAN);
+                buffer.putLong(messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+
+                final long result = aeronCluster.offer(buffer, 0, messageLength);
+                if (result < 0)
+                {
+                    checkPublicationResult(result);
+                    break;
+                }
+
+                count++;
+            }
         }
 
         return count;
