@@ -33,6 +33,8 @@ import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 
 public final class EchoClusteredService implements ClusteredService
 {
+    private static final boolean USE_TRY_CLAIM = Boolean.getBoolean("io.aeron.benchmarks.useTryClaim");
+
     private final BufferClaim bufferClaim = new BufferClaim();
     private IdleStrategy idleStrategy;
     private final long snapshotSize;
@@ -65,33 +67,44 @@ public final class EchoClusteredService implements ClusteredService
     {
         if (null == session)
         {
-            return; // skip non-client calls
-        }
-
-        final IdleStrategy idleStrategy = this.idleStrategy;
-        final BufferClaim bufferClaim = this.bufferClaim;
-
-        idleStrategy.reset();
-        long result;
-        while ((result = session.tryClaim(length, bufferClaim)) <= 0)
-        {
-            checkPublicationResult(result);
-            idleStrategy.idle();
-        }
-
-        // FIXME: This is not required with the latest master
-        if (ClientSession.MOCKED_OFFER == result)
-        {
-            bufferClaim.commit();
             return;
         }
 
-        final MutableDirectBuffer dstBuffer = bufferClaim.buffer();
-        final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
+        final IdleStrategy idleStrategy = this.idleStrategy;
+        idleStrategy.reset();
 
-        dstBuffer.putBytes(msgOffset, buffer, offset, length);
+        if (USE_TRY_CLAIM)
+        {
+            final BufferClaim bufferClaim = this.bufferClaim;
 
-        bufferClaim.flags(header.flags()).commit();
+            long result;
+            while ((result = session.tryClaim(length, bufferClaim)) <= 0)
+            {
+                checkPublicationResult(result);
+                idleStrategy.idle();
+            }
+
+            // FIXME: This is not required with the latest master
+            if (ClientSession.MOCKED_OFFER == result)
+            {
+                bufferClaim.commit();
+                return;
+            }
+
+            final MutableDirectBuffer dstBuffer = bufferClaim.buffer();
+            final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
+            dstBuffer.putBytes(msgOffset, buffer, offset, length);
+            bufferClaim.flags(header.flags()).commit();
+        }
+        else
+        {
+            long result;
+            while ((result = session.offer(buffer, offset, length)) <= 0)
+            {
+                checkPublicationResult(result);
+                idleStrategy.idle();
+            }
+        }
     }
 
     public void onTimerEvent(final long correlationId, final long timestamp)
