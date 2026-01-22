@@ -121,14 +121,17 @@ public final class AeronUtil
     public static final String FAILOVER_DELAY_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.delay";
     public static final String USE_TRY_CLAIM_PROP_NAME = "io.aeron.benchmarks.aeron.use.try.claim";
-    public static final boolean USE_TRY_CLAIM =
-        Boolean.parseBoolean(System.getProperty(USE_TRY_CLAIM_PROP_NAME, "true"));
     public static final int SEND_ATTEMPTS = 3;
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
 
     private AeronUtil()
     {
+    }
+
+    public static boolean useTryClaim()
+    {
+        return Boolean.parseBoolean(System.getProperty(USE_TRY_CLAIM_PROP_NAME, "true"));
     }
 
     public static int receiverCount()
@@ -564,11 +567,6 @@ public final class AeronUtil
         {
             return new File(parentDir, markFileName);
         }
-    }
-
-    public static UnsafeBuffer newMessageBuffer()
-    {
-        return new UnsafeBuffer(new byte[io.aeron.driver.Configuration.MAX_UDP_PAYLOAD_LENGTH]);
     }
 
     private static PrintWriter newWriter(final Path resultFile) throws IOException

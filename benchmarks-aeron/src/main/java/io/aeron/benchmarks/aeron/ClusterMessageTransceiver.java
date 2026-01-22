@@ -28,27 +28,27 @@ import io.aeron.logbuffer.Header;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.CloseHelper;
 import org.agrona.DirectBuffer;
+import org.agrona.ExpandableArrayBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
-import org.agrona.concurrent.UnsafeBuffer;
 
 import java.nio.file.Path;
 
 import static io.aeron.benchmarks.aeron.AeronUtil.SEND_ATTEMPTS;
-import static io.aeron.benchmarks.aeron.AeronUtil.USE_TRY_CLAIM;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
-import static io.aeron.benchmarks.aeron.AeronUtil.newMessageBuffer;
+import static io.aeron.benchmarks.aeron.AeronUtil.useTryClaim;
 import static io.aeron.benchmarks.aeron.AeronUtil.yieldUninterruptedly;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 
 public class ClusterMessageTransceiver extends MessageTransceiver implements EgressListener
 {
+    private static final boolean USE_TRY_CLAIM = useTryClaim();
     private final BufferClaim bufferClaim = new BufferClaim();
-    private final UnsafeBuffer buffer = newMessageBuffer();
+    private final ExpandableArrayBuffer buffer = new ExpandableArrayBuffer(1024);
 
     private final MediaDriver mediaDriver;
     private final AeronCluster.Context aeronClusterContext;
@@ -108,69 +108,14 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
 
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
-        int count = 0;
-        final AeronCluster aeronCluster = this.aeronCluster;
         if (USE_TRY_CLAIM)
         {
-            final BufferClaim bufferClaim = this.bufferClaim;
-            for (int i = 0; i < numberOfMessages; i++)
-            {
-                long result;
-                int retryCount = SEND_ATTEMPTS;
-                while (retryCount > 0)
-                {
-                    result = aeronCluster.tryClaim(messageLength, bufferClaim);
-                    if (result < 0)
-                    {
-                        if (checkPublicationResult(result, idleStrategy))
-                        {
-                            continue;
-                        }
-                        retryCount--;
-                    }
-                    else
-                    {
-                        final MutableDirectBuffer buffer = bufferClaim.buffer();
-                        final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
-                        buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
-                        buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-                        bufferClaim.commit();
-                        count++;
-                        break;
-                    }
-                }
-            }
+            return sendUsingTryClaim(numberOfMessages, messageLength, timestamp, checksum);
         }
         else
         {
-            final UnsafeBuffer buffer = this.buffer;
-            buffer.putLong(0, timestamp, LITTLE_ENDIAN);
-            buffer.putLong(messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-            for (int i = 0; i < numberOfMessages; i++)
-            {
-                long result;
-                int retryCount = SEND_ATTEMPTS;
-                while (retryCount > 0)
-                {
-                    result = aeronCluster.offer(buffer, 0, messageLength);
-                    if (result < 0)
-                    {
-                        if (checkPublicationResult(result, idleStrategy))
-                        {
-                            continue;
-                        }
-                        retryCount--;
-                    }
-                    else
-                    {
-                        count++;
-                        break;
-                    }
-                }
-            }
+            return sendUsingOffer(numberOfMessages, messageLength, timestamp, checksum);
         }
-
-        return count;
     }
 
     public void receive()
@@ -203,5 +148,84 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
         {
             throw new AeronException("Error from Cluster: " + detail);
         }
+    }
+
+
+    private int sendUsingTryClaim(
+        final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
+    {
+        int count = 0;
+        final AeronCluster aeronCluster = this.aeronCluster;
+        final BufferClaim bufferClaim = this.bufferClaim;
+        for (int i = 0; i < numberOfMessages; i++)
+        {
+            long result;
+            int retryCount = SEND_ATTEMPTS;
+            while (retryCount > 0)
+            {
+                result = aeronCluster.tryClaim(messageLength, bufferClaim);
+                if (result < 0)
+                {
+                    if (checkPublicationResult(result, idleStrategy))
+                    {
+                        continue;
+                    }
+                    if (0 == --retryCount)
+                    {
+                        return count;
+                    }
+                }
+                else
+                {
+                    final MutableDirectBuffer buffer = bufferClaim.buffer();
+                    final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
+                    buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
+                    buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+                    bufferClaim.commit();
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private int sendUsingOffer(
+        final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
+    {
+        int count = 0;
+        final AeronCluster aeronCluster = this.aeronCluster;
+        final ExpandableArrayBuffer buffer = this.buffer;
+        buffer.putLong(0, timestamp, LITTLE_ENDIAN);
+        buffer.putLong(messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+
+        for (int i = 0; i < numberOfMessages; i++)
+        {
+            long result;
+            int retryCount = SEND_ATTEMPTS;
+            while (retryCount > 0)
+            {
+                result = aeronCluster.offer(buffer, 0, messageLength);
+                if (result < 0)
+                {
+                    if (checkPublicationResult(result, idleStrategy))
+                    {
+                        continue;
+                    }
+                    if (0 == --retryCount)
+                    {
+                        return count;
+                    }
+                }
+                else
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
     }
 }
