@@ -29,6 +29,7 @@ import org.HdrHistogram.ValueRecorder;
 import org.agrona.CloseHelper;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
+import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.UnsafeBuffer;
 
@@ -36,7 +37,9 @@ import java.nio.file.Path;
 
 import static io.aeron.benchmarks.aeron.AeronUtil.USE_TRY_CLAIM;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
+import static io.aeron.benchmarks.aeron.AeronUtil.newMessageBuffer;
 import static io.aeron.benchmarks.aeron.AeronUtil.yieldUninterruptedly;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
@@ -44,12 +47,13 @@ import static org.agrona.BitUtil.SIZE_OF_LONG;
 public class ClusterMessageTransceiver extends MessageTransceiver implements EgressListener
 {
     private final BufferClaim bufferClaim = new BufferClaim();
-    private final UnsafeBuffer buffer =
-        new UnsafeBuffer(new byte[io.aeron.driver.Configuration.MAX_UDP_PAYLOAD_LENGTH]);
+    private final UnsafeBuffer buffer = newMessageBuffer();
+
     private final MediaDriver mediaDriver;
     private final AeronCluster.Context aeronClusterContext;
     private Path logsDir;
     private AeronCluster aeronCluster;
+    private IdleStrategy idleStrategy;
 
     public ClusterMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -71,6 +75,7 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
     {
         logsDir = configuration.logsDir();
         aeronCluster = AeronCluster.connect(aeronClusterContext);
+        idleStrategy = configuration.idleStrategy();
 
         while (true)
         {
@@ -92,7 +97,7 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
         if (null != aeronCluster)
         {
             final String prefix = "cluster-client-";
-            AeronUtil.dumpAeronStats(
+            dumpAeronStats(
                 aeronCluster.context().aeron().context().cncFile(),
                 logsDir.resolve(prefix + "aeron-stat.txt"),
                 logsDir.resolve(prefix + "errors.txt"));
@@ -112,7 +117,7 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
                 final long result = aeronCluster.tryClaim(messageLength, bufferClaim);
                 if (result < 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                     break;
                 }
 
@@ -135,7 +140,7 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
                 final long result = aeronCluster.offer(buffer, 0, messageLength);
                 if (result < 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                     break;
                 }
 

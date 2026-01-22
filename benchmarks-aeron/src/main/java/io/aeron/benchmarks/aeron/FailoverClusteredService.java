@@ -96,20 +96,12 @@ public final class FailoverClusteredService implements ClusteredService
         }
 
         final IdleStrategy idleStrategy = cluster.idleStrategy();
-        final BufferClaim bufferClaim = this.bufferClaim;
-
         idleStrategy.reset();
         long result;
-        while ((result = session.tryClaim(length, bufferClaim)) <= 0)
+        while ((result = session.offer(buffer, offset, length)) <= 0)
         {
-            checkPublicationResult(result);
-            idleStrategy.idle();
+            checkPublicationResult(result, idleStrategy);
         }
-
-        final MutableDirectBuffer dstBuffer = bufferClaim.buffer();
-        final int dstOffset = bufferClaim.offset() + SESSION_HEADER_LENGTH;
-        dstBuffer.putBytes(dstOffset, buffer, offset, length);
-        bufferClaim.commit();
     }
 
     private void onSyncMessage(final ClientSession session, final DirectBuffer buffer, final int offset)
@@ -138,8 +130,7 @@ public final class FailoverClusteredService implements ClusteredService
         long result;
         while ((result = session.tryClaim(SYNC_MESSAGE_LENGTH, bufferClaim)) <= 0)
         {
-            checkPublicationResult(result);
-            idleStrategy.idle();
+            checkPublicationResult(result, idleStrategy);
         }
 
         final MutableDirectBuffer dstBuffer = bufferClaim.buffer();

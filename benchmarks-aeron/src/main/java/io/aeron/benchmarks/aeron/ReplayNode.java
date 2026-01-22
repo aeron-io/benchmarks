@@ -24,7 +24,6 @@ import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -43,6 +42,7 @@ import static io.aeron.benchmarks.aeron.AeronUtil.RECEIVER_INDEX_OFFSET;
 import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
 import static io.aeron.benchmarks.aeron.AeronUtil.findLastRecordingId;
 import static io.aeron.benchmarks.aeron.AeronUtil.idleStrategy;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
@@ -64,7 +64,6 @@ import static org.agrona.PropertyAction.REPLACE;
  */
 public final class ReplayNode implements AutoCloseable, Runnable
 {
-    private final BufferClaim bufferClaim = new BufferClaim();
     private final FragmentHandler fragmentHandler;
     private final ExclusivePublication publication;
     private final Subscription subscription;
@@ -73,6 +72,7 @@ public final class ReplayNode implements AutoCloseable, Runnable
     private final AeronArchive aeronArchive;
     private final boolean ownsArchiveClient;
     private final int sessionId;
+    private final IdleStrategy idleStrategy;
     private Image image;
 
     ReplayNode(final AtomicBoolean running)
@@ -110,20 +110,18 @@ public final class ReplayNode implements AutoCloseable, Runnable
 
         subscription = aeron.addSubscription(addSessionId(replayChannel, sessionId), replayStreamId);
 
+        idleStrategy = idleStrategy();
+
         fragmentHandler = (buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
+                idleStrategy.reset();
                 long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                while ((result = publication.offer(buffer, offset, length)) <= 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                 }
-
-                bufferClaim
-                    .flags(header.flags())
-                    .putBytes(buffer, offset, length)
-                    .commit();
             }
         };
     }
@@ -188,7 +186,7 @@ public final class ReplayNode implements AutoCloseable, Runnable
             server.run();
 
             final String prefix = "replay-node-" + receiverIndex + "-";
-            AeronUtil.dumpAeronStats(
+            dumpAeronStats(
                 server.aeronArchive.context().aeron().context().cncFile(),
                 outputDir.resolve(prefix + "aeron-stat.txt"),
                 outputDir.resolve(prefix + "errors.txt"));

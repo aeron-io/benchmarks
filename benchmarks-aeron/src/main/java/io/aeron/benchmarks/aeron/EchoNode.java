@@ -21,7 +21,6 @@ import io.aeron.Image;
 import io.aeron.Subscription;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -41,6 +40,7 @@ import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
 import static io.aeron.benchmarks.aeron.AeronUtil.idleStrategy;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
 import static io.aeron.benchmarks.aeron.AeronUtil.receiverIndex;
@@ -56,7 +56,6 @@ import static org.agrona.PropertyAction.REPLACE;
  */
 public final class EchoNode implements AutoCloseable, Runnable
 {
-    private final BufferClaim bufferClaim = new BufferClaim();
     private final FragmentHandler fragmentHandler;
     private final ExclusivePublication publication;
     private final Subscription subscription;
@@ -64,6 +63,7 @@ public final class EchoNode implements AutoCloseable, Runnable
     private final MediaDriver mediaDriver;
     private final Aeron aeron;
     private final boolean ownsAeronClient;
+    private final IdleStrategy idleStrategy;
 
     EchoNode(final AtomicBoolean running)
     {
@@ -84,21 +84,18 @@ public final class EchoNode implements AutoCloseable, Runnable
 
         publication = aeron.addExclusivePublication(sourceChannel(), sourceStreamId());
         subscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
+        idleStrategy = idleStrategy();
 
         fragmentHandler = (buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
                 long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                idleStrategy.reset();
+                while ((result = publication.offer(buffer, offset, length)) <= 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                 }
-
-                bufferClaim
-                    .flags(header.flags())
-                    .putBytes(buffer, offset, length)
-                    .commit();
             }
         };
     }
@@ -110,8 +107,7 @@ public final class EchoNode implements AutoCloseable, Runnable
             connectionTimeoutNs(),
             SystemNanoClock.INSTANCE);
 
-        final IdleStrategy idleStrategy = idleStrategy();
-
+        final IdleStrategy idleStrategy = this.idleStrategy;
         final AtomicBoolean running = this.running;
 
         final Image image = subscription.imageAtIndex(0);
@@ -150,7 +146,7 @@ public final class EchoNode implements AutoCloseable, Runnable
     {
         mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
         final Path outputDir = Configuration.resolveLogsDir();
-        final int receiverIndex = AeronUtil.receiverIndex();
+        final int receiverIndex = receiverIndex();
 
         final AtomicBoolean running = new AtomicBoolean(true);
         try (ShutdownSignalBarrier shutdownSignalBarrier = new ShutdownSignalBarrier(() -> running.set(false));
@@ -161,7 +157,7 @@ public final class EchoNode implements AutoCloseable, Runnable
             node.run();
 
             final String prefix = "echo-node-" + receiverIndex + "-";
-            AeronUtil.dumpAeronStats(
+            dumpAeronStats(
                 node.aeron.context().cncFile(),
                 outputDir.resolve(prefix + "aeron-stat.txt"),
                 outputDir.resolve(prefix + "errors.txt"));

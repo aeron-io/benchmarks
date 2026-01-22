@@ -63,9 +63,8 @@ import java.util.function.BooleanSupplier;
 import static io.aeron.CncFileDescriptor.createCountersMetaDataBuffer;
 import static io.aeron.CncFileDescriptor.createCountersValuesBuffer;
 import static io.aeron.CommonContext.IPC_CHANNEL;
-import static io.aeron.Publication.CLOSED;
-import static io.aeron.Publication.MAX_POSITION_EXCEEDED;
-import static io.aeron.Publication.NOT_CONNECTED;
+import static io.aeron.Publication.ADMIN_ACTION;
+import static io.aeron.Publication.BACK_PRESSURED;
 import static io.aeron.archive.status.RecordingPos.findCounterIdBySession;
 import static io.aeron.archive.status.RecordingPos.getRecordingId;
 import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithEmbeddedDriver;
@@ -323,20 +322,15 @@ public final class AeronUtil
         final Subscription subscription, final ExclusivePublication publication, final AtomicBoolean running)
     {
         final IdleStrategy idleStrategy = idleStrategy();
-        final BufferClaim bufferClaim = new BufferClaim();
         final FragmentHandler dataHandler =
             (buffer, offset, length, header) ->
             {
+                idleStrategy.reset();
                 long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                while ((result = publication.offer(buffer, offset, length)) < 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                 }
-
-                bufferClaim
-                    .flags(header.flags())
-                    .putBytes(buffer, offset, length)
-                    .commit();
             };
 
         final Image image = subscription.imageAtIndex(0);
@@ -363,7 +357,8 @@ public final class AeronUtil
         final long timestamp,
         final long checksum,
         final MutableInteger receiverIndex,
-        final int receiverCount)
+        final int receiverCount,
+        final IdleStrategy idleStrategy)
     {
         int count = 0;
         for (int i = 0; i < numberOfMessages; i++)
@@ -372,7 +367,7 @@ public final class AeronUtil
             long result;
             while ((result = publication.tryClaim(messageLength, bufferClaim)) < 0)
             {
-                checkPublicationResult(result);
+                checkPublicationResult(result, idleStrategy);
                 if (0 == --retryCount)
                 {
                     return count;
@@ -380,6 +375,7 @@ public final class AeronUtil
             }
             final MutableDirectBuffer buffer = bufferClaim.buffer();
             final int offset = bufferClaim.offset();
+
             buffer.putLong(offset + TIMESTAMP_OFFSET, timestamp, LITTLE_ENDIAN);
 
             // set receiverIndex to ensure only one reply will be received
@@ -387,6 +383,7 @@ public final class AeronUtil
             receiverIndex.set(BitUtil.next(receiverIndex.get(), receiverCount));
 
             buffer.putLong(offset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+
             bufferClaim.commit();
             count++;
         }
@@ -439,11 +436,13 @@ public final class AeronUtil
         }
     }
 
-    public static void checkPublicationResult(final long result)
+    public static void checkPublicationResult(final long result, final IdleStrategy idleStrategy)
     {
-        if (result == CLOSED ||
-            result == NOT_CONNECTED ||
-            result == MAX_POSITION_EXCEEDED)
+        if (BACK_PRESSURED == result)
+        {
+            idleStrategy.idle();
+        }
+        else if (ADMIN_ACTION != result)
         {
             throw new AeronException("Publication error: " + Publication.errorString(result));
         }
@@ -558,6 +557,11 @@ public final class AeronUtil
         {
             return new File(parentDir, markFileName);
         }
+    }
+
+    public static UnsafeBuffer newMessageBuffer()
+    {
+        return new UnsafeBuffer(new byte[io.aeron.driver.Configuration.MAX_UDP_PAYLOAD_LENGTH]);
     }
 
     private static PrintWriter newWriter(final Path resultFile) throws IOException

@@ -23,6 +23,7 @@ import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.collections.MutableInteger;
+import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.SystemNanoClock;
 import io.aeron.benchmarks.Configuration;
@@ -55,6 +56,7 @@ public final class EchoMessageTransceiver extends MessageTransceiver
     ExclusivePublication publication;
     private Subscription subscription;
     private int receiverCount;
+    private IdleStrategy idleStrategy;
 
     public EchoMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -81,6 +83,7 @@ public final class EchoMessageTransceiver extends MessageTransceiver
         validateMessageLength(configuration.messageLength());
         publication = aeron.addExclusivePublication(destinationChannel(), destinationStreamId());
         subscription = aeron.addSubscription(sourceChannel(), sourceStreamId());
+        idleStrategy = configuration.idleStrategy();
 
         awaitConnected(
             () -> subscription.isConnected() && subscription.imageCount() == receiverCount &&
@@ -114,7 +117,8 @@ public final class EchoMessageTransceiver extends MessageTransceiver
             timestamp,
             checksum,
             receiverIndex,
-            receiverCount);
+            receiverCount,
+            idleStrategy);
     }
 
     public void receive()

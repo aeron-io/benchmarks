@@ -67,10 +67,9 @@ public final class EchoClusteredService implements ClusteredService
 
         idleStrategy.reset();
         long result;
-        while ((result = session.offer(buffer, offset, length)) <= 0)
+        while ((result = session.offer(buffer, offset, length)) < 0)
         {
-            checkPublicationResult(result);
-            idleStrategy.idle();
+            checkPublicationResult(result, idleStrategy);
         }
     }
 
@@ -89,7 +88,7 @@ public final class EchoClusteredService implements ClusteredService
             final int toWrite = (int)Math.min(buffer.capacity(), remaining);
 
             idleStrategy.reset();
-            while (0 > snapshotPublication.offer(buffer, 0, toWrite))
+            while (snapshotPublication.offer(buffer, 0, toWrite) < 0)
             {
                 idleStrategy.idle();
             }
