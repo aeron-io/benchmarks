@@ -122,9 +122,9 @@ public final class AeronUtil
     public static final String USE_TRY_CLAIM_PROP_NAME = "io.aeron.benchmarks.aeron.use.try.claim";
     public static final boolean USE_TRY_CLAIM =
         Boolean.parseBoolean(System.getProperty(USE_TRY_CLAIM_PROP_NAME, "true"));
+    public static final int SEND_ATTEMPTS = 3;
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
-    private static final int SEND_ATTEMPTS = 3;
 
     private AeronUtil()
     {
@@ -436,16 +436,18 @@ public final class AeronUtil
         }
     }
 
-    public static void checkPublicationResult(final long result, final IdleStrategy idleStrategy)
+    public static boolean checkPublicationResult(final long result, final IdleStrategy idleStrategy)
     {
         if (BACK_PRESSURED == result)
         {
             idleStrategy.idle();
+            return false;
         }
         else if (ADMIN_ACTION != result)
         {
             throw new AeronException("Publication error: " + Publication.errorString(result));
         }
+        return true;
     }
 
     public static ErrorHandler printingErrorHandler(final String context)

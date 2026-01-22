@@ -35,6 +35,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 
 import java.nio.file.Path;
 
+import static io.aeron.benchmarks.aeron.AeronUtil.SEND_ATTEMPTS;
 import static io.aeron.benchmarks.aeron.AeronUtil.USE_TRY_CLAIM;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
@@ -114,37 +115,58 @@ public class ClusterMessageTransceiver extends MessageTransceiver implements Egr
             final BufferClaim bufferClaim = this.bufferClaim;
             for (int i = 0; i < numberOfMessages; i++)
             {
-                final long result = aeronCluster.tryClaim(messageLength, bufferClaim);
-                if (result < 0)
+                long result;
+                int retryCount = SEND_ATTEMPTS;
+                while (retryCount > 0)
                 {
-                    checkPublicationResult(result, idleStrategy);
-                    break;
+                    result = aeronCluster.tryClaim(messageLength, bufferClaim);
+                    if (result < 0)
+                    {
+                        if (checkPublicationResult(result, idleStrategy))
+                        {
+                            continue;
+                        }
+                        retryCount--;
+                    }
+                    else
+                    {
+                        final MutableDirectBuffer buffer = bufferClaim.buffer();
+                        final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
+                        buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
+                        buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
+                        bufferClaim.commit();
+                        count++;
+                        break;
+                    }
                 }
-
-                final MutableDirectBuffer buffer = bufferClaim.buffer();
-                final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
-                buffer.putLong(msgOffset, timestamp, LITTLE_ENDIAN);
-                buffer.putLong(msgOffset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-                bufferClaim.commit();
-                count++;
             }
         }
         else
         {
             final UnsafeBuffer buffer = this.buffer;
+            buffer.putLong(0, timestamp, LITTLE_ENDIAN);
+            buffer.putLong(messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
             for (int i = 0; i < numberOfMessages; i++)
             {
-                buffer.putLong(0, timestamp, LITTLE_ENDIAN);
-                buffer.putLong(messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-
-                final long result = aeronCluster.offer(buffer, 0, messageLength);
-                if (result < 0)
+                long result;
+                int retryCount = SEND_ATTEMPTS;
+                while (retryCount > 0)
                 {
-                    checkPublicationResult(result, idleStrategy);
-                    break;
+                    result = aeronCluster.offer(buffer, 0, messageLength);
+                    if (result < 0)
+                    {
+                        if (checkPublicationResult(result, idleStrategy))
+                        {
+                            continue;
+                        }
+                        retryCount--;
+                    }
+                    else
+                    {
+                        count++;
+                        break;
+                    }
                 }
-
-                count++;
             }
         }
 
