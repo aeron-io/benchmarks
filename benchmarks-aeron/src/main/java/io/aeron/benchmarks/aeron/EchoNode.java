@@ -18,6 +18,7 @@ package io.aeron.benchmarks.aeron;
 import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.ImageFragmentAssembler;
 import io.aeron.Subscription;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
@@ -86,7 +87,7 @@ public final class EchoNode implements AutoCloseable, Runnable
         subscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
         idleStrategy = idleStrategy();
 
-        fragmentHandler = (buffer, offset, length, header) ->
+        fragmentHandler = new ImageFragmentAssembler((buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
@@ -97,7 +98,7 @@ public final class EchoNode implements AutoCloseable, Runnable
                     checkPublicationResult(result, idleStrategy);
                 }
             }
-        };
+        });
     }
 
     public void run()

@@ -19,6 +19,7 @@ import io.aeron.Aeron;
 import io.aeron.CncFileDescriptor;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.ImageFragmentAssembler;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 import io.aeron.archive.ArchiveMarkFile;
@@ -322,7 +323,7 @@ public final class AeronUtil
         final Subscription subscription, final ExclusivePublication publication, final AtomicBoolean running)
     {
         final IdleStrategy idleStrategy = idleStrategy();
-        final FragmentHandler dataHandler =
+        final FragmentHandler fragmentHandler = new ImageFragmentAssembler(
             (buffer, offset, length, header) ->
             {
                 idleStrategy.reset();
@@ -331,12 +332,12 @@ public final class AeronUtil
                 {
                     checkPublicationResult(result, idleStrategy);
                 }
-            };
+            });
 
         final Image image = subscription.imageAtIndex(0);
         while (true)
         {
-            final int fragmentsRead = image.poll(dataHandler, FRAGMENT_LIMIT);
+            final int fragmentsRead = image.poll(fragmentHandler, FRAGMENT_LIMIT);
             if (0 == fragmentsRead)
             {
                 if (!running.get() || image.isClosed())

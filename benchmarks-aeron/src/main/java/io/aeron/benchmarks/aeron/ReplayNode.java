@@ -20,6 +20,7 @@ import io.aeron.ChannelUri;
 import io.aeron.CommonContext;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.ImageFragmentAssembler;
 import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.benchmarks.Configuration;
@@ -112,7 +113,7 @@ public final class ReplayNode implements AutoCloseable, Runnable
 
         idleStrategy = idleStrategy();
 
-        fragmentHandler = (buffer, offset, length, header) ->
+        fragmentHandler = new ImageFragmentAssembler((buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
@@ -123,7 +124,7 @@ public final class ReplayNode implements AutoCloseable, Runnable
                     checkPublicationResult(result, idleStrategy);
                 }
             }
-        };
+        });
     }
 
     public void run()
