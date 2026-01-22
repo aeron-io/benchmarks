@@ -1,5 +1,5 @@
 FROM ubuntu:noble AS builder
-ARG AERON_VERSION_SELECTOR="--aeron-git-tag 1.44.1"
+ARG AERON_VERSION_SELECTOR="--aeron-git-tag 1.50.0"
 ENV BENCHMARKS_PATH=/opt/aeron-benchmarks
 
 RUN apt-get update -y &&\
