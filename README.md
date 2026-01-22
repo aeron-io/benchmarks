@@ -31,9 +31,11 @@ For [Aeron](https://aeron.io/) the following test scenarios were implemented:
 
 1. Echo benchmark.
 
-   An Aeron Transport benchmark which consist of a client process that sends messages over UDP using an exclusive 
-   publication and zero-copy API (i.e. [`tryClaim`](https://github.com/aeron-io/aeron/blob/3f6c5e15bd30a83d46978bf39eff8d927f30fe5a/aeron-client/src/main/java/io/aeron/Publication.java#L556)).
-   And the server process which echoes the received messages back using the same API.
+   An Aeron Transport benchmark which consist of a client process that sends messages over UDP via an exclusive 
+   publication using either zero-copy `tryClaim` or `offer` API. Configuration option
+   `io.aeron.benchmarks.aeron.use.try.claim` controls which API is used. If no value is specified then `tryClaim` will
+   be used.
+   And the server process which echoes the complete (re-assembled) received messages back using `offer` API.
 
 
 2. Live replay from a remote Archive.
