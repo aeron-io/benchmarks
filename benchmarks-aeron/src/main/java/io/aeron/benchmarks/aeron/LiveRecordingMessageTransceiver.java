@@ -25,13 +25,10 @@ import io.aeron.archive.client.RecordingEventsAdapter;
 import io.aeron.archive.client.RecordingEventsListener;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.benchmarks.MessageTransceiver;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.ControlledFragmentHandler;
 import io.aeron.logbuffer.Header;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.DirectBuffer;
-import org.agrona.collections.MutableInteger;
-import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.SystemNanoClock;
 
@@ -48,7 +45,6 @@ import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchArchivingMediaDriver;
-import static io.aeron.benchmarks.aeron.AeronUtil.sendMessages;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static io.aeron.logbuffer.ControlledFragmentHandler.Action.ABORT;
@@ -73,17 +69,15 @@ public final class LiveRecordingMessageTransceiver extends MessageTransceiver im
     private final ImageControlledFragmentAssembler messageHandler = new ImageControlledFragmentAssembler(this);
     private final ArchivingMediaDriver archivingMediaDriver;
     private final AeronArchive aeronArchive;
-    private final MutableInteger receiverIndex = new MutableInteger();
 
     private ExclusivePublication publication;
-    private final BufferClaim bufferClaim = new BufferClaim();
 
     private Subscription recordingEventsSubscription;
     private RecordingEventsAdapter recordingEventsAdapter;
     private Subscription subscription;
     private Image image;
     private Path logsDir;
-    private IdleStrategy idleStrategy;
+    private MessageSender messageSender;
 
     public LiveRecordingMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -122,7 +116,7 @@ public final class LiveRecordingMessageTransceiver extends MessageTransceiver im
         recordingEventsAdapter = new RecordingEventsAdapter(
             new LiveRecordingEventsListener(this), recordingEventsSubscription, FRAGMENT_LIMIT);
 
-        idleStrategy = configuration.idleStrategy();
+        messageSender = MessageSender.create(publication, configuration.idleStrategy(), 1);
 
         awaitConnected(
             () -> recordingEventsSubscription.isConnected() && subscription.isConnected() && publication.isConnected(),
@@ -158,16 +152,7 @@ public final class LiveRecordingMessageTransceiver extends MessageTransceiver im
 
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
-        return sendMessages(
-            publication,
-            bufferClaim,
-            numberOfMessages,
-            messageLength,
-            timestamp,
-            checksum,
-            receiverIndex,
-            1,
-            idleStrategy);
+        return messageSender.send(numberOfMessages, messageLength, timestamp, checksum);
     }
 
     public void receive()

@@ -24,10 +24,7 @@ import io.aeron.archive.client.AeronArchive;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.benchmarks.MessageTransceiver;
 import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
 import org.HdrHistogram.ValueRecorder;
-import org.agrona.collections.MutableInteger;
-import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
 import org.agrona.concurrent.SystemNanoClock;
 
@@ -45,7 +42,6 @@ import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfCon
 import static io.aeron.benchmarks.aeron.AeronUtil.recordChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.recordStream;
 import static io.aeron.benchmarks.aeron.AeronUtil.replayFullRecording;
-import static io.aeron.benchmarks.aeron.AeronUtil.sendMessages;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
@@ -57,10 +53,7 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
     private final MediaDriver mediaDriver;
     private final AeronArchive aeronArchive;
     private final boolean ownsArchiveClient;
-
     private ExclusivePublication publication;
-    private final BufferClaim bufferClaim = new BufferClaim();
-
     private Subscription subscription;
     private Image image;
     private final FragmentAssembler dataHandler = new FragmentAssembler(
@@ -70,9 +63,8 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
             final long checksum = buffer.getLong(offset + length - SIZE_OF_LONG, LITTLE_ENDIAN);
             onMessageReceived(timestamp, checksum);
         });
-    private final MutableInteger receiverIndex = new MutableInteger();
     private Path logsDir;
-    private IdleStrategy idleStrategy;
+    private MessageSender messageSender;
 
     public LiveReplayMessageTransceiver(
         final NanoClock nanoClock,
@@ -114,7 +106,7 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
         final String channel = addSessionId(replayChannel, (int)replaySessionId);
         subscription = aeron.addSubscription(channel, replayStreamId);
 
-        idleStrategy = configuration.idleStrategy();
+        messageSender = MessageSender.create(publication, configuration.idleStrategy(), 1);
 
         awaitConnected(subscription::isConnected, connectionTimeoutNs, clock);
 
@@ -138,16 +130,7 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
 
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
-        return sendMessages(
-            publication,
-            bufferClaim,
-            numberOfMessages,
-            messageLength,
-            timestamp,
-            checksum,
-            receiverIndex,
-            1,
-            idleStrategy);
+        return messageSender.send(numberOfMessages, messageLength, timestamp, checksum);
     }
 
     public void receive()

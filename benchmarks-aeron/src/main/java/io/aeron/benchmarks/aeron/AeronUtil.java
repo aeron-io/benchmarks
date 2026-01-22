@@ -30,14 +30,10 @@ import io.aeron.benchmarks.Configuration;
 import io.aeron.cluster.service.ClusterMarkFile;
 import io.aeron.driver.MediaDriver;
 import io.aeron.exceptions.AeronException;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
-import org.agrona.BitUtil;
 import org.agrona.ErrorHandler;
 import org.agrona.IoUtil;
-import org.agrona.MutableDirectBuffer;
 import org.agrona.SemanticVersion;
-import org.agrona.collections.MutableInteger;
 import org.agrona.collections.MutableLong;
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.IdleStrategy;
@@ -74,7 +70,6 @@ import static java.lang.Boolean.getBoolean;
 import static java.lang.Integer.getInteger;
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.System.getProperty;
-import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
@@ -351,52 +346,6 @@ public final class AeronUtil
 
             idleStrategy.idle(fragmentsRead);
         }
-    }
-
-    public static int sendMessages(
-        final ExclusivePublication publication,
-        final BufferClaim bufferClaim,
-        final int numberOfMessages,
-        final int messageLength,
-        final long timestamp,
-        final long checksum,
-        final MutableInteger receiverIndex,
-        final int receiverCount,
-        final IdleStrategy idleStrategy)
-    {
-        int count = 0;
-        for (int i = 0; i < numberOfMessages; i++)
-        {
-            int retryCount = SEND_ATTEMPTS;
-            long result;
-            while ((result = publication.tryClaim(messageLength, bufferClaim)) < 0)
-            {
-                if (checkPublicationResult(result, idleStrategy))
-                {
-                    continue;
-                }
-
-                if (0 == --retryCount)
-                {
-                    return count;
-                }
-            }
-            final MutableDirectBuffer buffer = bufferClaim.buffer();
-            final int offset = bufferClaim.offset();
-
-            buffer.putLong(offset + TIMESTAMP_OFFSET, timestamp, LITTLE_ENDIAN);
-
-            // set receiverIndex to ensure only one reply will be received
-            buffer.putInt(offset + RECEIVER_INDEX_OFFSET, receiverIndex.get(), LITTLE_ENDIAN);
-            receiverIndex.set(BitUtil.next(receiverIndex.get(), receiverCount));
-
-            buffer.putLong(offset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-
-            bufferClaim.commit();
-            count++;
-        }
-
-        return count;
     }
 
     public static void yieldUninterruptedly()
