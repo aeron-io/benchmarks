@@ -98,7 +98,7 @@ public final class FailoverClusteredService implements ClusteredService
         final IdleStrategy idleStrategy = cluster.idleStrategy();
         idleStrategy.reset();
         long result;
-        while ((result = session.offer(buffer, offset, length)) <= 0)
+        while ((result = session.offer(buffer, offset, length)) < 0)
         {
             checkPublicationResult(result, idleStrategy);
         }
@@ -128,7 +128,7 @@ public final class FailoverClusteredService implements ClusteredService
 
         idleStrategy.reset();
         long result;
-        while ((result = session.tryClaim(SYNC_MESSAGE_LENGTH, bufferClaim)) <= 0)
+        while ((result = session.tryClaim(SYNC_MESSAGE_LENGTH, bufferClaim)) < 0)
         {
             checkPublicationResult(result, idleStrategy);
         }

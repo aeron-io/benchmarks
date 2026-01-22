@@ -92,7 +92,7 @@ public final class EchoNode implements AutoCloseable, Runnable
             {
                 long result;
                 idleStrategy.reset();
-                while ((result = publication.offer(buffer, offset, length)) <= 0)
+                while ((result = publication.offer(buffer, offset, length)) < 0)
                 {
                     checkPublicationResult(result, idleStrategy);
                 }

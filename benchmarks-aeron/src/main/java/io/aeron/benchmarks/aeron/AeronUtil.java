@@ -367,7 +367,11 @@ public final class AeronUtil
             long result;
             while ((result = publication.tryClaim(messageLength, bufferClaim)) < 0)
             {
-                checkPublicationResult(result, idleStrategy);
+                if (checkPublicationResult(result, idleStrategy))
+                {
+                    continue;
+                }
+
                 if (0 == --retryCount)
                 {
                     return count;

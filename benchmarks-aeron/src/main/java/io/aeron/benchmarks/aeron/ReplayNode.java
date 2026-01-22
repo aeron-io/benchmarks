@@ -118,7 +118,7 @@ public final class ReplayNode implements AutoCloseable, Runnable
             {
                 idleStrategy.reset();
                 long result;
-                while ((result = publication.offer(buffer, offset, length)) <= 0)
+                while ((result = publication.offer(buffer, offset, length)) < 0)
                 {
                     checkPublicationResult(result, idleStrategy);
                 }
