@@ -168,14 +168,6 @@ public final class LoadTestRig
                 configuration.outputDirectory(),
                 configuration.outputFileNamePrefix(),
                 status);
-            if (configuration.trackHistory())
-            {
-                histogram.saveHistoryToCsvFile(
-                    configuration.outputDirectory(),
-                    configuration.outputFileNamePrefix(),
-                    status,
-                    50.0, 99.0, 99.9, 99.99, 99.999, 100.0);
-            }
         }
         finally
         {

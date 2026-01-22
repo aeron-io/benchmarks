@@ -179,14 +179,6 @@ public final class FailoverTestRig implements FailoverListener
             saveRawDataToFile(
                 configuration.warmupIterations() * configuration.warmupMessageRate(),
                 histogramPath);
-            if (configuration.trackHistory())
-            {
-                histogram.saveHistoryToCsvFile(
-                    configuration.outputDirectory(),
-                    configuration.outputFileNamePrefix(),
-                    status,
-                    50.0, 99.0, 99.99, 100.0);
-            }
         }
         finally
         {
