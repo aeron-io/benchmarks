@@ -150,6 +150,10 @@ public final class ClusterNode
                     archive.context().aeron().context().cncFile(),
                     logsDir.resolve(prefix + "aeron-stat.txt"),
                     logsDir.resolve(prefix + "errors.txt"));
+                AeronUtil.dumpLossStat(
+                    aeronDirectoryName,
+                    logsDir.resolve(prefix + "loss-stat.txt")
+                );
             }
         }
     }

@@ -315,7 +315,8 @@ do
       "-Dio.aeron.benchmarks.output.file=${test} \
       -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS} \
       -Dio.aeron.benchmarks.aeron.destination.channel=${CLIENT_DESTINATION_CHANNEL} \
-      -Dio.aeron.benchmarks.aeron.source.channel=${CLIENT_SOURCE_CHANNEL}" \
+      -Dio.aeron.benchmarks.aeron.source.channel=${CLIENT_SOURCE_CHANNEL} \
+      -Dio.aeron.benchmarks.aeron.use.try.claim=${USE_TRY_CLAIM:-true}" \
       "-Dio.aeron.benchmarks.aeron.destination.channel=${SERVER_DESTINATION_CHANNEL} \
       -Dio.aeron.benchmarks.aeron.source.channel=${SERVER_SOURCE_CHANNEL}"
   done

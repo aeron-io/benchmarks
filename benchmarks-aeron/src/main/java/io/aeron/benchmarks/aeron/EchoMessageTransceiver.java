@@ -19,26 +19,32 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.FragmentAssembler;
 import io.aeron.Subscription;
-import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
-import org.HdrHistogram.ValueRecorder;
-import org.agrona.collections.MutableInteger;
-import org.agrona.concurrent.NanoClock;
-import org.agrona.concurrent.SystemNanoClock;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.benchmarks.MessageTransceiver;
+import io.aeron.driver.MediaDriver;
+import org.HdrHistogram.ValueRecorder;
+import org.agrona.concurrent.NanoClock;
+import org.agrona.concurrent.SystemNanoClock;
 
 import java.nio.file.Path;
 
 import static io.aeron.Aeron.connect;
+import static io.aeron.benchmarks.aeron.AeronUtil.FRAGMENT_LIMIT;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
+import static io.aeron.benchmarks.aeron.AeronUtil.receiverCount;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.validateMessageLength;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
 
 public final class EchoMessageTransceiver extends MessageTransceiver
 {
-    private final BufferClaim bufferClaim = new BufferClaim();
     private final FragmentAssembler dataHandler = new FragmentAssembler(
         (buffer, offset, length, header) ->
         {
@@ -50,11 +56,11 @@ public final class EchoMessageTransceiver extends MessageTransceiver
     private final MediaDriver mediaDriver;
     private final Aeron aeron;
     private final boolean ownsAeronClient;
-    private final MutableInteger receiverIndex = new MutableInteger();
     private Path logsDir;
     ExclusivePublication publication;
     private Subscription subscription;
     private int receiverCount;
+    private MessageSender messageSender;
 
     public EchoMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
@@ -82,9 +88,13 @@ public final class EchoMessageTransceiver extends MessageTransceiver
         publication = aeron.addExclusivePublication(destinationChannel(), destinationStreamId());
         subscription = aeron.addSubscription(sourceChannel(), sourceStreamId());
 
+        messageSender = MessageSender.create(publication, configuration.idleStrategy(), receiverCount);
+
         awaitConnected(
-            () -> subscription.isConnected() && subscription.imageCount() == receiverCount &&
-            publication.isConnected() && publication.availableWindow() > 0,
+            () -> subscription.isConnected() &&
+            subscription.imageCount() == receiverCount &&
+            publication.isConnected() &&
+            publication.availableWindow() > 0,
             connectionTimeoutNs(),
             SystemNanoClock.INSTANCE);
     }
@@ -106,15 +116,7 @@ public final class EchoMessageTransceiver extends MessageTransceiver
 
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
-        return sendMessages(
-            publication,
-            bufferClaim,
-            numberOfMessages,
-            messageLength,
-            timestamp,
-            checksum,
-            receiverIndex,
-            receiverCount);
+        return messageSender.send(numberOfMessages, messageLength, timestamp, checksum);
     }
 
     public void receive()

@@ -19,6 +19,7 @@ import io.aeron.Aeron;
 import io.aeron.CncFileDescriptor;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.ImageFragmentAssembler;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 import io.aeron.archive.ArchiveMarkFile;
@@ -28,15 +29,13 @@ import io.aeron.archive.client.RecordingDescriptorConsumer;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.cluster.service.ClusterMarkFile;
 import io.aeron.driver.MediaDriver;
+import io.aeron.driver.reports.LossReportReader;
+import io.aeron.driver.reports.LossReportUtil;
 import io.aeron.exceptions.AeronException;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
-import org.agrona.BitUtil;
 import org.agrona.ErrorHandler;
 import org.agrona.IoUtil;
-import org.agrona.MutableDirectBuffer;
 import org.agrona.SemanticVersion;
-import org.agrona.collections.MutableInteger;
 import org.agrona.collections.MutableLong;
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.IdleStrategy;
@@ -48,6 +47,7 @@ import org.agrona.concurrent.status.CountersReader;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.nio.MappedByteBuffer;
@@ -63,9 +63,8 @@ import java.util.function.BooleanSupplier;
 import static io.aeron.CncFileDescriptor.createCountersMetaDataBuffer;
 import static io.aeron.CncFileDescriptor.createCountersValuesBuffer;
 import static io.aeron.CommonContext.IPC_CHANNEL;
-import static io.aeron.Publication.CLOSED;
-import static io.aeron.Publication.MAX_POSITION_EXCEEDED;
-import static io.aeron.Publication.NOT_CONNECTED;
+import static io.aeron.Publication.ADMIN_ACTION;
+import static io.aeron.Publication.BACK_PRESSURED;
 import static io.aeron.archive.status.RecordingPos.findCounterIdBySession;
 import static io.aeron.archive.status.RecordingPos.getRecordingId;
 import static io.aeron.benchmarks.aeron.ArchivingMediaDriver.launchArchiveWithEmbeddedDriver;
@@ -74,7 +73,6 @@ import static java.lang.Boolean.getBoolean;
 import static java.lang.Integer.getInteger;
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.System.getProperty;
-import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
@@ -120,11 +118,18 @@ public final class AeronUtil
         "io.aeron.benchmarks.aeron.cluster.failover.control.endpoints";
     public static final String FAILOVER_DELAY_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.delay";
+    public static final String USE_TRY_CLAIM_PROP_NAME = "io.aeron.benchmarks.aeron.use.try.claim";
+    public static final int SEND_ATTEMPTS = 3;
+
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
-    private static final int SEND_ATTEMPTS = 3;
 
     private AeronUtil()
     {
+    }
+
+    public static boolean useTryClaim()
+    {
+        return Boolean.parseBoolean(System.getProperty(USE_TRY_CLAIM_PROP_NAME, "true"));
     }
 
     public static int receiverCount()
@@ -319,26 +324,21 @@ public final class AeronUtil
         final Subscription subscription, final ExclusivePublication publication, final AtomicBoolean running)
     {
         final IdleStrategy idleStrategy = idleStrategy();
-        final BufferClaim bufferClaim = new BufferClaim();
-        final FragmentHandler dataHandler =
+        final FragmentHandler fragmentHandler = new ImageFragmentAssembler(
             (buffer, offset, length, header) ->
             {
+                idleStrategy.reset();
                 long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                while ((result = publication.offer(buffer, offset, length)) < 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                 }
-
-                bufferClaim
-                    .flags(header.flags())
-                    .putBytes(buffer, offset, length)
-                    .commit();
-            };
+            });
 
         final Image image = subscription.imageAtIndex(0);
         while (true)
         {
-            final int fragmentsRead = image.poll(dataHandler, FRAGMENT_LIMIT);
+            final int fragmentsRead = image.poll(fragmentHandler, FRAGMENT_LIMIT);
             if (0 == fragmentsRead)
             {
                 if (!running.get() || image.isClosed())
@@ -349,45 +349,6 @@ public final class AeronUtil
 
             idleStrategy.idle(fragmentsRead);
         }
-    }
-
-    public static int sendMessages(
-        final ExclusivePublication publication,
-        final BufferClaim bufferClaim,
-        final int numberOfMessages,
-        final int messageLength,
-        final long timestamp,
-        final long checksum,
-        final MutableInteger receiverIndex,
-        final int receiverCount)
-    {
-        int count = 0;
-        for (int i = 0; i < numberOfMessages; i++)
-        {
-            int retryCount = SEND_ATTEMPTS;
-            long result;
-            while ((result = publication.tryClaim(messageLength, bufferClaim)) < 0)
-            {
-                checkPublicationResult(result);
-                if (0 == --retryCount)
-                {
-                    return count;
-                }
-            }
-            final MutableDirectBuffer buffer = bufferClaim.buffer();
-            final int offset = bufferClaim.offset();
-            buffer.putLong(offset + TIMESTAMP_OFFSET, timestamp, LITTLE_ENDIAN);
-
-            // set receiverIndex to ensure only one reply will be received
-            buffer.putInt(offset + RECEIVER_INDEX_OFFSET, receiverIndex.get(), LITTLE_ENDIAN);
-            receiverIndex.set(BitUtil.next(receiverIndex.get(), receiverCount));
-
-            buffer.putLong(offset + messageLength - SIZE_OF_LONG, checksum, LITTLE_ENDIAN);
-            bufferClaim.commit();
-            count++;
-        }
-
-        return count;
     }
 
     public static void yieldUninterruptedly()
@@ -435,14 +396,18 @@ public final class AeronUtil
         }
     }
 
-    public static void checkPublicationResult(final long result)
+    public static boolean checkPublicationResult(final long result, final IdleStrategy idleStrategy)
     {
-        if (result == CLOSED ||
-            result == NOT_CONNECTED ||
-            result == MAX_POSITION_EXCEEDED)
+        if (BACK_PRESSURED == result)
+        {
+            idleStrategy.idle();
+            return false;
+        }
+        else if (ADMIN_ACTION != result)
         {
             throw new AeronException("Publication error: " + Publication.errorString(result));
         }
+        return true;
     }
 
     public static ErrorHandler printingErrorHandler(final String context)
@@ -531,6 +496,35 @@ public final class AeronUtil
             {
                 throw new UncheckedIOException(e);
             }
+        }
+    }
+
+    public static void dumpLossStat(final String aeronDirectoryName, final Path resultFile)
+    {
+        Thread.interrupted();
+
+        final File lossReportFile = LossReportUtil.file(aeronDirectoryName);
+        try (PrintStream out = new PrintStream(resultFile.toFile()))
+        {
+            try
+            {
+                final MappedByteBuffer mappedByteBuffer = IoUtil.mapExistingFile(
+                    lossReportFile, FileChannel.MapMode.READ_ONLY, "loss-report");
+
+                final AtomicBuffer buffer = new UnsafeBuffer(mappedByteBuffer);
+
+                out.println(LossReportReader.LOSS_REPORT_CSV_HEADER);
+                final int entriesRead = LossReportReader.read(buffer, LossReportReader.defaultEntryConsumer(out));
+                out.println(entriesRead + " loss entries");
+            }
+            catch (final Exception ex)
+            {
+                out.println(ex.getMessage());
+            }
+        }
+        catch (final IOException ex)
+        {
+            throw new UncheckedIOException(ex);
         }
     }
 

@@ -515,6 +515,7 @@ do
             -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
             -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
             -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir}\
+            -Dio.aeron.benchmarks.aeron.use.try.claim=${USE_TRY_CLAIM:-true}\
             -Daeron.cluster.ingress.channel=${CLIENT_INGRESS_CHANNEL}\
             ${client_ingress_endpoints}\
             -Daeron.cluster.egress.channel=${CLIENT_EGRESS_CHANNEL}\
