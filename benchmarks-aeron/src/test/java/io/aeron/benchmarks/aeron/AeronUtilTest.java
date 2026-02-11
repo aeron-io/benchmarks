@@ -31,6 +31,7 @@ import org.agrona.concurrent.errors.DistinctErrorLog;
 import org.agrona.concurrent.ringbuffer.RingBufferDescriptor;
 import org.agrona.concurrent.status.AtomicCounter;
 import org.agrona.concurrent.status.CountersManager;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,14 +56,52 @@ import java.util.function.BooleanSupplier;
 import static io.aeron.CncFileDescriptor.createCountersMetaDataBuffer;
 import static io.aeron.CncFileDescriptor.createCountersValuesBuffer;
 import static io.aeron.CommonContext.IPC_CHANNEL;
+import static io.aeron.benchmarks.aeron.AeronUtil.CONNECTION_TIMEOUT_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.DESTINATION_CHANNEL_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.DESTINATION_STREAM_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.EMBEDDED_MEDIA_DRIVER_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.IDLE_STRATEGY_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.RECORD_CHANNEL_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.RECORD_STREAM_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.REPLAY_CHANNEL_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.REPLAY_STREAM_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.SOURCE_CHANNEL_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.SOURCE_STREAM_PROP_NAME;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpArchiveErrors;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpClusterErrors;
+import static io.aeron.benchmarks.aeron.AeronUtil.embeddedMediaDriver;
+import static io.aeron.benchmarks.aeron.AeronUtil.idleStrategy;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordStream;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.resolveMarkFile;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static java.lang.System.clearProperty;
 import static java.lang.System.setProperty;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.util.concurrent.TimeUnit.*;
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.agrona.IoUtil.mapNewFile;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 class AeronUtilTest
 {
@@ -532,6 +571,20 @@ class AeronUtilTest
         assertTrue(errors.endsWith("1 distinct errors observed." + System.lineSeparator()));
     }
 
+    @Test
+    void shouldDumpLossStat(@TempDir final Path resultsDir) throws IOException
+    {
+        final Path p = resolveToProjectRoot("benchmarks-aeron/src/test/resources/loss-report.dat");
+        AeronUtil.dumpLossStat(p.getParent().toString(), resultsDir.resolve("loss.txt"));
+    }
+
+    @Test
+    void shouldNotFailDumpLossStatIfInputDoesNotExist(@TempDir final Path resultsDir) throws IOException
+    {
+        final Path p = resolveToProjectRoot("benchmarks-aeron/src/test/");
+        AeronUtil.dumpLossStat(p.getParent().toString(), resultsDir.resolve("loss.txt"));
+    }
+
     private static List<Arguments> connectionTimeouts()
     {
         return Arrays.asList(
@@ -539,5 +592,31 @@ class AeronUtilTest
             Arguments.arguments("16us", MICROSECONDS.toNanos(16)),
             Arguments.arguments("31ms", MILLISECONDS.toNanos(31)),
             Arguments.arguments("42s", SECONDS.toNanos(42)));
+    }
+
+    private Path resolveToProjectRoot(final String path)
+    {
+        final Path current = Path.of(System.getProperty("user.dir"));
+        return resovleToProjectRoot(current, path);
+    }
+
+    private static @NonNull Path resovleToProjectRoot(final Path current, final String path)
+    {
+        if (Files.exists(current.resolve("build.gradle")))
+        {
+            return current.resolve(path);
+        }
+        else
+        {
+            final Path parent = current.getParent();
+            if (null != parent)
+            {
+                return resovleToProjectRoot(parent, path);
+            }
+            else
+            {
+                throw new IllegalArgumentException("Unable to find build.gradle");
+            }
+        }
     }
 }

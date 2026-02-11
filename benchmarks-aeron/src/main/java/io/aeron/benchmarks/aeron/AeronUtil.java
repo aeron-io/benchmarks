@@ -29,6 +29,8 @@ import io.aeron.archive.client.RecordingDescriptorConsumer;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.cluster.service.ClusterMarkFile;
 import io.aeron.driver.MediaDriver;
+import io.aeron.driver.reports.LossReportReader;
+import io.aeron.driver.reports.LossReportUtil;
 import io.aeron.exceptions.AeronException;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.ErrorHandler;
@@ -45,6 +47,7 @@ import org.agrona.concurrent.status.CountersReader;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.nio.MappedByteBuffer;
@@ -493,6 +496,35 @@ public final class AeronUtil
             {
                 throw new UncheckedIOException(e);
             }
+        }
+    }
+
+    public static void dumpLossStat(final String aeronDirectoryName, final Path resultFile)
+    {
+        Thread.interrupted();
+
+        final File lossReportFile = LossReportUtil.file(aeronDirectoryName);
+        try (PrintStream out = new PrintStream(resultFile.toFile()))
+        {
+            try
+            {
+                final MappedByteBuffer mappedByteBuffer = IoUtil.mapExistingFile(
+                    lossReportFile, FileChannel.MapMode.READ_ONLY, "loss-report");
+
+                final AtomicBuffer buffer = new UnsafeBuffer(mappedByteBuffer);
+
+                out.println(LossReportReader.LOSS_REPORT_CSV_HEADER);
+                final int entriesRead = LossReportReader.read(buffer, LossReportReader.defaultEntryConsumer(out));
+                out.println(entriesRead + " loss entries");
+            }
+            catch (final Exception ex)
+            {
+                out.println(ex.getMessage());
+            }
+        }
+        catch (final IOException ex)
+        {
+            throw new UncheckedIOException(ex);
         }
     }
 

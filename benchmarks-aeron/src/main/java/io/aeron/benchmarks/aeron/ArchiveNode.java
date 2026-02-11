@@ -132,6 +132,10 @@ public final class ArchiveNode implements AutoCloseable, Runnable
                 outputDir.resolve(prefix + "aeron-stat.txt"),
                 outputDir.resolve(prefix + "errors.txt")
             );
+            AeronUtil.dumpLossStat(
+                server.archivingMediaDriver.archive.context().aeronDirectoryName(),
+                outputDir.resolve(prefix + "loss-stat.txt")
+            );
         }
     }
 }
