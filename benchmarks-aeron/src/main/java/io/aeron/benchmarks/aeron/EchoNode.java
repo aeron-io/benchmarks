@@ -162,6 +162,10 @@ public final class EchoNode implements AutoCloseable, Runnable
                 node.aeron.context().cncFile(),
                 outputDir.resolve(prefix + "aeron-stat.txt"),
                 outputDir.resolve(prefix + "errors.txt"));
+            AeronUtil.dumpLossStat(
+                node.aeron.context().aeronDirectoryName(),
+                outputDir.resolve(prefix + "loss-stat.txt")
+            );
         }
     }
 }
