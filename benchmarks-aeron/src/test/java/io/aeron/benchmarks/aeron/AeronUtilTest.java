@@ -31,7 +31,6 @@ import org.agrona.concurrent.errors.DistinctErrorLog;
 import org.agrona.concurrent.ringbuffer.RingBufferDescriptor;
 import org.agrona.concurrent.status.AtomicCounter;
 import org.agrona.concurrent.status.CountersManager;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -600,7 +599,7 @@ class AeronUtilTest
         return resovleToProjectRoot(current, path);
     }
 
-    private static @NonNull Path resovleToProjectRoot(final Path current, final String path)
+    private static Path resovleToProjectRoot(final Path current, final String path)
     {
         if (Files.exists(current.resolve("build.gradle")))
         {
