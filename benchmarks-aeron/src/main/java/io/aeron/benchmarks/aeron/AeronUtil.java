@@ -102,6 +102,14 @@ public final class AeronUtil
         "io.aeron.benchmarks.aeron.destination.stream";
     public static final String SOURCE_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.source.channel";
     public static final String SOURCE_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.source.stream";
+    public static final String DESTINATION_CHANNELS_PROP_NAME =
+        "io.aeron.benchmarks.aeron.destination.channels";
+    public static final String DESTINATION_STREAMS_PROP_NAME =
+        "io.aeron.benchmarks.aeron.destination.streams";
+    public static final String SOURCE_CHANNELS_PROP_NAME =
+        "io.aeron.benchmarks.aeron.source.channels";
+    public static final String SOURCE_STREAMS_PROP_NAME =
+        "io.aeron.benchmarks.aeron.source.streams";
     public static final String RECORD_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.record.channel";
     public static final String RECORD_STREAM_PROP_NAME = "io.aeron.benchmarks.aeron.record.stream";
     public static final String REPLAY_CHANNEL_PROP_NAME = "io.aeron.benchmarks.aeron.replay.channel";
@@ -200,6 +208,54 @@ public final class AeronUtil
         return Integer.parseInt(property);
     }
 
+    public static String[] destinationChannels()
+    {
+        final String property = getProperty(DESTINATION_CHANNELS_PROP_NAME);
+        if (isEmpty(property))
+        {
+            throw new IllegalStateException(
+                "Property " + DESTINATION_CHANNELS_PROP_NAME + " must be set for multi-channel configuration");
+        }
+
+        return property.split(",");
+    }
+
+    public static int[] destinationStreams()
+    {
+        final String property = getProperty(DESTINATION_STREAMS_PROP_NAME);
+        if (isEmpty(property))
+        {
+            throw new IllegalStateException(
+                "Property " + DESTINATION_STREAMS_PROP_NAME + " must be set for multi-channel configuration");
+        }
+
+        return parseIntArray(property);
+    }
+
+    public static String[] sourceChannels()
+    {
+        final String property = getProperty(SOURCE_CHANNELS_PROP_NAME);
+        if (isEmpty(property))
+        {
+            throw new IllegalStateException(
+                "Property " + SOURCE_CHANNELS_PROP_NAME + " must be set for multi-channel configuration");
+        }
+
+        return property.split(",");
+    }
+
+    public static int[] sourceStreams()
+    {
+        final String property = getProperty(SOURCE_STREAMS_PROP_NAME);
+        if (isEmpty(property))
+        {
+            throw new IllegalStateException(
+                "Property " + SOURCE_STREAMS_PROP_NAME + " must be set for multi-channel configuration");
+        }
+
+        return parseIntArray(property);
+    }
+
     public static String recordChannel()
     {
         final String property = getProperty(RECORD_CHANNEL_PROP_NAME);
@@ -289,21 +345,21 @@ public final class AeronUtil
 
         final RecordingDescriptorConsumer consumer =
             (controlSessionId,
-            correlationId,
-            recordingId,
-            startTimestamp,
-            stopTimestamp,
-            startPosition,
-            stopPosition,
-            initialTermId,
-            segmentFileLength,
-            termBufferLength,
-            mtuLength,
-            sessionId,
-            streamId,
-            strippedChannel,
-            originalChannel,
-            sourceIdentity) -> lastRecordingId.set(recordingId);
+             correlationId,
+             recordingId,
+             startTimestamp,
+             stopTimestamp,
+             startPosition,
+             stopPosition,
+             initialTermId,
+             segmentFileLength,
+             termBufferLength,
+             mtuLength,
+             sessionId,
+             streamId,
+             strippedChannel,
+             originalChannel,
+             sourceIdentity) -> lastRecordingId.set(recordingId);
 
         int foundCount;
         do
@@ -556,6 +612,31 @@ public final class AeronUtil
         }
     }
 
+    static void assertChannelsAndStreamsMatch(
+        final String[] channels,
+        final int[] streams,
+        final String channelsPropName,
+        final String streamsPropName)
+    {
+        if (channels.length != streams.length)
+        {
+            throw new IllegalArgumentException(
+                "Number of " + channelsPropName + " (" + channels.length +
+                    ") does not match number of " + streamsPropName + " (" + streams.length + ")");
+        }
+    }
+
+    private static int[] parseIntArray(final String value)
+    {
+        final String[] parts = value.split(",");
+        final int[] result = new int[parts.length];
+        for (int i = 0; i < parts.length; i++)
+        {
+            result[i] = Integer.parseInt(parts[i].trim());
+        }
+        return result;
+    }
+
     private static PrintWriter newWriter(final Path resultFile) throws IOException
     {
         return new PrintWriter(Files.newBufferedWriter(resultFile, US_ASCII, WRITE, CREATE, TRUNCATE_EXISTING));
@@ -570,12 +651,12 @@ public final class AeronUtil
                 final int distinctErrorCount = ErrorLogReader.read(
                     errorBuffer,
                     (observationCount, firstObservationTimestamp, lastObservationTimestamp, encodedException) ->
-                    writer.format(
-                    "%n%d observations from %s to %s for:%n %s%n",
-                    observationCount,
-                    DATE_FORMAT.format(new Date(firstObservationTimestamp)),
-                    DATE_FORMAT.format(new Date(lastObservationTimestamp)),
-                    encodedException));
+                        writer.format(
+                            "%n%d observations from %s to %s for:%n %s%n",
+                            observationCount,
+                            DATE_FORMAT.format(new Date(firstObservationTimestamp)),
+                            DATE_FORMAT.format(new Date(lastObservationTimestamp)),
+                            encodedException));
                 writer.format("%d distinct errors observed.%n", distinctErrorCount);
             }
         }
