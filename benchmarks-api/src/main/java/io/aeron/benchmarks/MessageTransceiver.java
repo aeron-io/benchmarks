@@ -153,9 +153,9 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
         RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
     }
 
-    long expectedReceivedMessages(final Configuration configuration)
+    public long expectedReceivedMessages(final long iterations, final long messageRate)
     {
-        return (long)configuration.iterations() * configuration.messageRate();
+        return iterations * messageRate;
     }
 
     final void reset()

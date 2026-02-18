@@ -176,8 +176,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         }
     }
 
-    long expectedReceivedMessages(final Configuration configuration)
+    public long expectedReceivedMessages(final long iterations, final long messageRate)
     {
-        return (long)configuration.iterations() * configuration.messageRate() * numReceivers;
+        return iterations * messageRate * numReceivers;
     }
 }

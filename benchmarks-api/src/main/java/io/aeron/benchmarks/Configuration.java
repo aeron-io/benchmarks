@@ -835,8 +835,22 @@ public final class Configuration
         {
         }
 
+        try
+        {
+            final Constructor<? extends MessageTransceiver> constructor = klass.getConstructor(
+                NanoClock.class, PersistedHistogramSet.class);
+            if (isPublic(constructor.getModifiers()))
+            {
+                return klass;
+            }
+        }
+        catch (final NoSuchMethodException ignore)
+        {
+        }
+
         throw new IllegalArgumentException(
-            "MessageTransceiver class must have a public constructor that takes a NanoClock and a ValueRecorder");
+            "MessageTransceiver class must have a public constructor that takes a NanoClock and a ValueRecorder" +
+                " or a NanoClock and a PersistedHistogramSet");
     }
 
     private static boolean isPropertyProvided(final String propName)

@@ -28,7 +28,6 @@ import java.lang.reflect.Constructor;
 import java.util.Properties;
 import java.util.function.BiFunction;
 
-import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
 import static java.lang.Math.min;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -58,7 +57,7 @@ public final class LoadTestRig
 
     public LoadTestRig(final Configuration configuration)
     {
-        this(configuration, SystemNanoClock.INSTANCE, newPersistedHistogram(configuration),
+        this(configuration, SystemNanoClock.INSTANCE, null,
             null, null, System.out, null);
     }
 
@@ -209,7 +208,7 @@ public final class LoadTestRig
     }
 
     @SuppressWarnings("MethodLength")
-    SendResult send(final int iterations, final int numberOfMessages)
+    SendResult send(final int iterations, final int messageRate)
     {
         final MessageTransceiver messageTransceiver = this.messageTransceiver;
         final NanoClock clock = this.clock;
@@ -219,8 +218,8 @@ public final class LoadTestRig
         // The `sendIntervalNs` might be off if the division is not exact in which case more messages will be sent per
         // second than specified via `numberOfMessages`. However, this guarantees that the duration of the send
         // operation is bound by the number of iterations.
-        final long sendIntervalNs = NANOS_PER_SECOND * burstSize / numberOfMessages;
-        final long totalNumberOfMessages = (long)iterations * numberOfMessages;
+        final long sendIntervalNs = NANOS_PER_SECOND * burstSize / messageRate;
+        final long totalNumberOfMessages = (long)iterations * messageRate;
         final long startTimeNs = clock.nanoTime();
         final long stopTimeNs = startTimeNs + (iterations * NANOS_PER_SECOND);
 
@@ -296,8 +295,9 @@ public final class LoadTestRig
 
         idleStrategy.reset();
         long receivedMessageCount = messageTransceiver.receivedMessages();
+        final long expectedReceivedMessageCount = messageTransceiver.expectedReceivedMessages(iterations, messageRate);
         final long deadline = clock.nanoTime() + RECEIVE_DEADLINE_NS;
-        while (receivedMessageCount < sentMessages)
+        while (receivedMessageCount < expectedReceivedMessageCount)
         {
             messageTransceiver.receive();
             final long newReceivedMessageCount = messageTransceiver.receivedMessages();
