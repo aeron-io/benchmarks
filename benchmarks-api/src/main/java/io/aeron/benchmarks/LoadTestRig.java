@@ -38,7 +38,6 @@ import static org.agrona.PropertyAction.REPLACE;
 import static io.aeron.benchmarks.MessageTransceiver.CHECKSUM;
 import static io.aeron.benchmarks.PersistedHistogram.Status.FAIL;
 import static io.aeron.benchmarks.PersistedHistogram.Status.OK;
-import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
 import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 
@@ -187,14 +186,6 @@ public final class LoadTestRig
 
             final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);
             histogramSet.saveAll(configuration.outputDirectory(), status);
-
-            if (configuration.trackHistory())
-            {
-                histogramSet.saveAllHistory(
-                    configuration.outputDirectory(),
-                    status,
-                    50.0, 99.0, 99.9, 99.99, 99.999, 100.0);
-            }
         }
         finally
         {

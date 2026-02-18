@@ -18,6 +18,7 @@ package io.aeron.benchmarks;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.CloseHelper;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -26,7 +27,7 @@ import java.util.Map;
 import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
 
 /**
- * Factory that creates and tracks named {@link PersistedHistogram} instances.
+ * A set that creates and tracks named {@link PersistedHistogram} instances.
  * <p>
  * Used by {@link MessageTransceiver} implementations that need multiple histograms
  * (e.g. one per receiver in a fan-out benchmark). The {@link LoadTestRig} uses this
@@ -118,30 +119,13 @@ public final class PersistedHistogramSet
      * @param outputDirectory the output directory.
      * @param status          the benchmark status.
      */
-    public void saveAll(final Path outputDirectory, final PersistedHistogram.Status status)
+    public void saveAll(final Path outputDirectory, final PersistedHistogram.Status status) throws IOException
     {
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
-            entry.getValue().saveToFile(outputDirectory, entry.getKey(), status);
-        }
-    }
-
-    /**
-     * Save history CSV files for all histograms.
-     *
-     * @param outputDirectory the output directory.
-     * @param status          the benchmark status.
-     * @param percentiles     the percentiles to include.
-     */
-    public void saveAllHistory(
-        final Path outputDirectory,
-        final PersistedHistogram.Status status,
-        final double... percentiles)
-    {
-        for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
-        {
-            entry.getValue().saveHistoryToCsvFile(
-                outputDirectory, entry.getKey(), status, percentiles);
+            PersistedHistogram histogram = entry.getValue();
+            String name = entry.getKey();
+            histogram.saveToFile(outputDirectory, name, status);
         }
     }
 
