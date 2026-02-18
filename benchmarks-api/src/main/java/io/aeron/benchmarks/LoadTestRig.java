@@ -105,9 +105,14 @@ public final class LoadTestRig
         this.out = requireNonNull(out);
         this.clock = requireNonNull(nanoClock);
 
-        this.histogramSet = persistedHistogram != null ?
-            PersistedHistogramSet.wrap(configuration.outputFileNamePrefix(), persistedHistogram) :
-            new PersistedHistogramSet(configuration);
+        if (persistedHistogram != null)
+        {
+            this.histogramSet = PersistedHistogramSet.wrap(configuration.outputFileNamePrefix(), persistedHistogram);
+        }
+        else
+        {
+            this.histogramSet = new PersistedHistogramSet(configuration);
+        }
 
         if (messageTransceiver != null)
         {
@@ -363,7 +368,6 @@ public final class LoadTestRig
                         ValueRecorder newValueRecorder = valueRecorder;
                         if (newValueRecorder == null)
                         {
-                            // todo: better name than foobar
                             newValueRecorder = histogramSet.create(
                                 configuration.outputFileNamePrefix()).valueRecorder();
                         }
