@@ -39,9 +39,9 @@ abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 {
     static final AtomicLongFieldUpdater<MessageTransceiverHotFields> RECEIVED_MESSAGES_UPDATER =
         AtomicLongFieldUpdater.newUpdater(MessageTransceiverHotFields.class, "receivedMessages");
-    final NanoClock clock;
+    protected final NanoClock clock;
     final ValueRecorder valueRecorder;
-    private volatile long receivedMessages;
+    volatile long receivedMessages;
 
     MessageTransceiverHotFields(final NanoClock clock, final ValueRecorder valueRecorder)
     {
@@ -151,6 +151,11 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
 
         valueRecorder.recordValue(clock.nanoTime() - timestamp);
         RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
+    }
+
+    long expectedReceivedMessages(final Configuration configuration)
+    {
+        return (long)configuration.iterations() * configuration.messageRate();
     }
 
     final void reset()
