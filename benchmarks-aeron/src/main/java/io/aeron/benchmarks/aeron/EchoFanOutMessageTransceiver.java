@@ -95,8 +95,13 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         logsDir = configuration.logsDir();
         validateMessageLength(configuration.messageLength());
 
+        System.out.println("EchoFanOutMessageTransceiver.init()");
+
         // Single outbound publication
+        System.out.println("  creating publication: channel=" + destinationChannel() +
+            " stream=" + destinationStreamId());
         publication = aeron.addExclusivePublication(destinationChannel(), destinationStreamId());
+        System.out.println("  publication created: sessionId=" + publication.sessionId());
 
         // N inbound reply subscriptions
         final String[] srcChannels = sourceChannels();
@@ -106,10 +111,14 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         numReceivers = srcChannels.length;
         subscriptions = new Subscription[numReceivers];
         fragmentHandlers = new FragmentHandler[numReceivers];
+        System.out.println("  numReceivers: " + numReceivers);
 
         for (int i = 0; i < numReceivers; i++)
         {
+            System.out.println("  creating subscription[" + i + "]: channel=" +
+                srcChannels[i] + " stream=" + srcStreams[i]);
             subscriptions[i] = aeron.addSubscription(srcChannels[i], srcStreams[i]);
+            System.out.println("  subscription[" + i + "] created");
 
             final ValueRecorder recorder = histogramSet.create("receiver-" + i).valueRecorder();
             fragmentHandlers[i] = new FragmentAssembler(
@@ -123,26 +132,35 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
                 });
         }
 
+        long remainingConnectTimeoutNs = connectionTimeoutNs();
+
+        System.out.println("  awaiting publication connection " +
+            "(remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms)...");
+        long startNs = SystemNanoClock.INSTANCE.nanoTime();
         awaitConnected(
-            () ->
-            {
-                if (!publication.isConnected() || publication.availableWindow() <= 0)
-                {
-                    return false;
-                }
-
-                for (final Subscription subscription : subscriptions)
-                {
-                    if (!subscription.isConnected())
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            },
-            connectionTimeoutNs(),
+            () -> publication.isConnected() && publication.availableWindow() > 0,
+            remainingConnectTimeoutNs,
             SystemNanoClock.INSTANCE);
+        remainingConnectTimeoutNs -= SystemNanoClock.INSTANCE.nanoTime() - startNs;
+        System.out.println("  publication connected (remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms)");
+
+        for (int i = 0; i < numReceivers; i++)
+        {
+            System.out.println("  awaiting subscription[" + i + "] " +
+                "(remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms): channel=" + subscriptions[i].channel() +
+                " stream=" + subscriptions[i].streamId());
+            startNs = SystemNanoClock.INSTANCE.nanoTime();
+            final int idx = i;
+            awaitConnected(
+                () -> subscriptions[idx].isConnected(),
+                remainingConnectTimeoutNs,
+                SystemNanoClock.INSTANCE);
+            remainingConnectTimeoutNs -= SystemNanoClock.INSTANCE.nanoTime() - startNs;
+            System.out.println("  subscription[" + i + "] connected (remaining " +
+                remainingConnectTimeoutNs / 1_000_000 + "ms)");
+        }
+
+        System.out.println("  all connected");
     }
 
     public void destroy()

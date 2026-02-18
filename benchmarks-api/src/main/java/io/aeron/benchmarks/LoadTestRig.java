@@ -194,7 +194,8 @@ public final class LoadTestRig
             histogramSet.outputPercentileDistributions(
                 out, Configuration.outputScaleRatio(configuration.outputTimeUnit()));
 
-            final long expectedTotalNumberOfMessages = configuration.iterations() * (long)configuration.messageRate();
+            final long expectedTotalNumberOfMessages = messageTransceiver.expectedReceivedMessages(
+                configuration.iterations(), configuration.messageRate());
             warnIfTargetRateNotAchieved(result, expectedTotalNumberOfMessages);
 
             final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);

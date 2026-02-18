@@ -82,8 +82,16 @@ public final class EchoNode implements AutoCloseable, Runnable
         this.aeron = aeron;
         this.ownsAeronClient = ownsAeronClient;
 
+        System.out.println("EchoNode.init(receiverIndex=" + receiverIndex + ")");
+        System.out.println("  publication (source):     channel=" + sourceChannel() + " stream=" + sourceStreamId());
+        System.out.println("  subscription (destination): channel=" + destinationChannel() +
+            " stream=" + destinationStreamId());
+
         publication = aeron.addExclusivePublication(sourceChannel(), sourceStreamId());
+        System.out.println("  publication created: sessionId=" + publication.sessionId());
+
         subscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
+        System.out.println("  subscription created");
 
         fragmentHandler = (buffer, offset, length, header) ->
         {
