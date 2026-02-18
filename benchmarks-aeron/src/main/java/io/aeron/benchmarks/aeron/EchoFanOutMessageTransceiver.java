@@ -83,7 +83,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         final Aeron aeron,
         final boolean ownsAeronClient)
     {
-        super(nanoClock, histogramSet.create("result"));
+        super(nanoClock, histogramSet.create("result").valueRecorder());
         this.histogramSet = histogramSet;
         this.mediaDriver = mediaDriver;
         this.aeron = aeron;
@@ -111,7 +111,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         {
             subscriptions[i] = aeron.addSubscription(srcChannels[i], srcStreams[i]);
 
-            final ValueRecorder recorder = histogramSet.create("receiver-" + i);
+            final ValueRecorder recorder = histogramSet.create("receiver-" + i).valueRecorder();
             fragmentHandlers[i] = new FragmentAssembler(
                 (buffer, offset, length, header) ->
                 {

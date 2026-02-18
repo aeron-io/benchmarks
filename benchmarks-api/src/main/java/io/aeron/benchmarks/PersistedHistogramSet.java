@@ -52,13 +52,14 @@ public final class PersistedHistogramSet
      * Wrap a pre-existing {@link PersistedHistogram} in a factory.
      * Used for backward compatibility with constructors that receive a single histogram.
      *
+     * @param outputNamePrefix outputNamePrefix
      * @param histogram the existing histogram.
      * @return a factory containing the histogram under the name "result".
      */
-    public static PersistedHistogramSet wrap(final PersistedHistogram histogram)
+    public static PersistedHistogramSet wrap(final String outputNamePrefix, final PersistedHistogram histogram)
     {
         final PersistedHistogramSet factory = new PersistedHistogramSet();
-        factory.histograms.put("result", histogram);
+        factory.histograms.put(outputNamePrefix, histogram);
         return factory;
     }
 
@@ -70,7 +71,7 @@ public final class PersistedHistogramSet
      * @throws IllegalArgumentException if a histogram with the same name already exists.
      * @throws IllegalStateException if factory was created via {@link #wrap} (no configuration available).
      */
-    public ValueRecorder create(final String name)
+    public PersistedHistogram create(final String name)
     {
         if (null == configuration)
         {
@@ -84,7 +85,7 @@ public final class PersistedHistogramSet
 
         final PersistedHistogram histogram = newPersistedHistogram(configuration);
         histograms.put(name, histogram);
-        return histogram.valueRecorder();
+        return histogram;
     }
 
     /**
@@ -108,8 +109,10 @@ public final class PersistedHistogramSet
     {
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
-            out.printf("%nHistogram [%s]:%n", entry.getKey());
-            entry.getValue().outputPercentileDistribution(out, scaleRatio);
+            final String name = entry.getKey();
+            final PersistedHistogram histogram = entry.getValue();
+            out.printf("%nHistogram [%s]:%n", name);
+            histogram.outputPercentileDistribution(out, scaleRatio);
         }
     }
 
@@ -123,8 +126,8 @@ public final class PersistedHistogramSet
     {
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
-            PersistedHistogram histogram = entry.getValue();
-            String name = entry.getKey();
+            final PersistedHistogram histogram = entry.getValue();
+            final String name = entry.getKey();
             histogram.saveToFile(outputDirectory, name, status);
         }
     }

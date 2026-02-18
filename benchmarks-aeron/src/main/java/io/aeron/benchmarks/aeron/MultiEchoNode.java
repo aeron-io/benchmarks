@@ -223,7 +223,7 @@ public final class MultiEchoNode implements AutoCloseable, Runnable
 
         final AtomicBoolean running = new AtomicBoolean(true);
         try (ShutdownSignalBarrier shutdownSignalBarrier = new ShutdownSignalBarrier(() -> running.set(false));
-             MultiEchoNode node = new MultiEchoNode(running))
+            MultiEchoNode node = new MultiEchoNode(running))
         {
             Thread.currentThread().setName("echo-" + receiverIndex);
 

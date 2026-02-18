@@ -345,21 +345,21 @@ public final class AeronUtil
 
         final RecordingDescriptorConsumer consumer =
             (controlSessionId,
-             correlationId,
-             recordingId,
-             startTimestamp,
-             stopTimestamp,
-             startPosition,
-             stopPosition,
-             initialTermId,
-             segmentFileLength,
-             termBufferLength,
-             mtuLength,
-             sessionId,
-             streamId,
-             strippedChannel,
-             originalChannel,
-             sourceIdentity) -> lastRecordingId.set(recordingId);
+            correlationId,
+            recordingId,
+            startTimestamp,
+            stopTimestamp,
+            startPosition,
+            stopPosition,
+            initialTermId,
+            segmentFileLength,
+            termBufferLength,
+            mtuLength,
+            sessionId,
+            streamId,
+            strippedChannel,
+            originalChannel,
+            sourceIdentity) -> lastRecordingId.set(recordingId);
 
         int foundCount;
         do
@@ -651,12 +651,12 @@ public final class AeronUtil
                 final int distinctErrorCount = ErrorLogReader.read(
                     errorBuffer,
                     (observationCount, firstObservationTimestamp, lastObservationTimestamp, encodedException) ->
-                        writer.format(
-                            "%n%d observations from %s to %s for:%n %s%n",
-                            observationCount,
-                            DATE_FORMAT.format(new Date(firstObservationTimestamp)),
-                            DATE_FORMAT.format(new Date(lastObservationTimestamp)),
-                            encodedException));
+                    writer.format(
+                    "%n%d observations from %s to %s for:%n %s%n",
+                    observationCount,
+                    DATE_FORMAT.format(new Date(firstObservationTimestamp)),
+                    DATE_FORMAT.format(new Date(lastObservationTimestamp)),
+                    encodedException));
                 writer.format("%d distinct errors observed.%n", distinctErrorCount);
             }
         }
