@@ -16,6 +16,7 @@
 package io.aeron.benchmarks;
 
 import org.HdrHistogram.Histogram;
+import org.HdrHistogram.HistogramLogReader;
 import org.HdrHistogram.SingleWriterRecorder;
 import org.HdrHistogram.ValueRecorder;
 import org.junit.jupiter.api.Test;
@@ -24,25 +25,18 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Random;
-import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static io.aeron.benchmarks.PersistedHistogram.AGGREGATE_FILE_SUFFIX;
 import static io.aeron.benchmarks.PersistedHistogram.Status.OK;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoggingPersistedHistogramTest
 {
     @Test
     void shouldRecordHistory(final @TempDir Path tempDir) throws IOException, InterruptedException
     {
-        final long[] counts = { 0, 0 };
-        final int totalCountIndex = 0;
-        final int entryCountIndex = 1;
-        final Path results;
-
         try (PersistedHistogram histogram = new LoggingPersistedHistogram(tempDir, new SingleWriterRecorder(3)))
         {
             Files.createFile(tempDir.resolve("another_one" + AGGREGATE_FILE_SUFFIX));
@@ -65,23 +59,26 @@ class LoggingPersistedHistogramTest
             }
 
             histogram.saveToFile(tempDir, "results", OK);
-            try (Stream<Histogram> history = histogram.historyIterator())
-            {
-                history.forEach(
-                    (h) ->
-                    {
-                        counts[totalCountIndex] += h.getTotalCount();
-                        counts[entryCountIndex]++;
-                    });
-            }
-
-            assertEquals(5000, counts[totalCountIndex]);
-            // Number of files is not deterministic and varies with the speed of the system.
-            assertTrue(5 <= counts[entryCountIndex]);
-
-            results = histogram.saveHistoryToCsvFile(tempDir, "results", OK, 50.0, 99.0, 99.99, 100.0);
         }
-        final List<String> strings = Files.readAllLines(results);
-        assertEquals(counts[entryCountIndex] + 1, strings.size());
+
+        long totalCount = 0;
+        int histogramCount = 0;
+        try (HistogramLogReader reader = new HistogramLogReader(tempDir + "/loadtestrig.hgrm"))
+        {
+            while (reader.hasNext())
+            {
+                final Histogram histogram = (Histogram)reader.nextIntervalHistogram();
+                if (histogram != null)
+                {
+                    histogramCount++;
+                    totalCount += histogram.getTotalCount();
+                }
+            }
+        }
+
+        assertEquals(5000, totalCount);
+
+        // Number of files is not deterministic and varies with the speed of the system.
+        assertTrue(5 <= histogramCount);
     }
 }

@@ -23,9 +23,7 @@ import org.HdrHistogram.ValueRecorder;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.stream.Stream;
 
 import static java.util.concurrent.TimeUnit.HOURS;
 
@@ -39,7 +37,7 @@ public interface PersistedHistogram extends AutoCloseable
     /**
      * File extension used to persist history of the histogram values on disc.
      */
-    String HISTORY_FILE_EXTENSION = ".csv";
+    String HISTORY_FILE_EXTENSION = ".hgrm.csv";
 
     /**
      * File suffix for aggregated histogram.
@@ -103,14 +101,9 @@ public interface PersistedHistogram extends AutoCloseable
     void reset();
 
     /**
-     * Returns an iterator over a sequence of histograms that form a recording history. Iterator may be empty or only
-     * contain a single value depending on the data recorded and the underlying implementation. An implementation that
-     * does not track history could return just a single value regardless of the amount of time spent during the
-     * recording.
-     *
-     * @return a sequence of histograms in the form of an iterator.
+     * {@inheritDoc}
      */
-    Stream<Histogram> historyIterator();
+    void close();
 
     static Path saveHistogramToFile(
         final Histogram histogram, final Path outputDirectory, final String prefix, final Status status)
@@ -127,43 +120,6 @@ public interface PersistedHistogram extends AutoCloseable
             return name + FAILED_FILE_SUFFIX;
         }
         return name;
-    }
-
-    default Path saveHistoryToCsvFile(
-        final Path outputDirectory, final String prefix, final Status status, final double... percentiles)
-        throws IOException
-    {
-        final Path csvPath = outputDirectory.resolve(fileName(status, prefix, HISTORY_FILE_EXTENSION));
-
-        try (PrintStream output = new PrintStream(csvPath.toFile(), StandardCharsets.US_ASCII))
-        {
-            output.print("timestamp (ms)");
-            for (final double percentile : percentiles)
-            {
-                output.print(",");
-                output.print(percentile);
-            }
-            output.println();
-
-            try (Stream<Histogram> history = historyIterator())
-            {
-                history.forEach(
-                    (historyEntry) ->
-                    {
-                        final long midPointTimestamp = historyEntry.getStartTimeStamp() +
-                            ((historyEntry.getEndTimeStamp() - historyEntry.getStartTimeStamp()) / 2);
-                        output.print(midPointTimestamp);
-                        for (final double percentile : percentiles)
-                        {
-                            output.print(",");
-                            output.print(historyEntry.getValueAtPercentile(percentile));
-                        }
-                        output.println();
-                    });
-            }
-        }
-
-        return csvPath;
     }
 
     static boolean isHdrFile(final String fileName, final String fileExtension)
@@ -194,11 +150,6 @@ public interface PersistedHistogram extends AutoCloseable
 
         return file;
     }
-
-    /**
-     * {@inheritDoc}
-     */
-    void close();
 
     @SuppressWarnings("checkstyle:indentation")
     static PersistedHistogram newPersistedHistogram(final Configuration configuration)
