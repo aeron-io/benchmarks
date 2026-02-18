@@ -194,7 +194,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         }
     }
 
-    public long expectedReceivedMessages(final long iterations, final long messageRate)
+    public long expectedResponseMessages(final long iterations, final long messageRate)
     {
         return iterations * messageRate * numReceivers;
     }

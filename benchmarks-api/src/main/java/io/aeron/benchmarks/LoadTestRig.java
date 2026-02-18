@@ -194,11 +194,13 @@ public final class LoadTestRig
             histogramSet.outputPercentileDistributions(
                 out, Configuration.outputScaleRatio(configuration.outputTimeUnit()));
 
-            final long expectedTotalNumberOfMessages = messageTransceiver.expectedReceivedMessages(
+            final long expectedTotalRequests = (long)configuration.iterations() * configuration.messageRate();
+            final long expectedTotalResponses = messageTransceiver.expectedResponseMessages(
                 configuration.iterations(), configuration.messageRate());
-            warnIfTargetRateNotAchieved(result, expectedTotalNumberOfMessages);
 
-            final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);
+            warnIfTargetRateNotAchieved(result, expectedTotalRequests, expectedTotalResponses);
+
+            final PersistedHistogram.Status status = result.status(expectedTotalRequests, expectedTotalResponses);
             histogramSet.saveAll(configuration.outputDirectory(), status);
         }
         finally
@@ -220,7 +222,8 @@ public final class LoadTestRig
         // second than specified via `numberOfMessages`. However, this guarantees that the duration of the send
         // operation is bound by the number of iterations.
         final long sendIntervalNs = NANOS_PER_SECOND * burstSize / messageRate;
-        final long totalNumberOfMessages = (long)iterations * messageRate;
+        final long totalNumberOfRequests = (long)iterations * messageRate;
+        final long totalNumberOfResponses = messageTransceiver.expectedResponseMessages(iterations, messageRate);
         final long startTimeNs = clock.nanoTime();
         final long stopTimeNs = startTimeNs + (iterations * NANOS_PER_SECOND);
 
@@ -228,13 +231,13 @@ public final class LoadTestRig
         long nowNs = startTimeNs, timestampNs = startTimeNs;
         long nextReportTimeNs = startTimeNs + NANOS_PER_SECOND;
 
-        int batchSize = (int)min(totalNumberOfMessages, burstSize);
-        while (sentMessages < totalNumberOfMessages)
+        int batchSize = (int)min(totalNumberOfRequests, burstSize);
+        while (sentMessages < totalNumberOfRequests)
         {
             final int sent = messageTransceiver.send(batchSize, messageSize, timestampNs, CHECKSUM);
             sentMessages += sent;
 
-            if (totalNumberOfMessages == sentMessages)
+            if (totalNumberOfRequests == sentMessages)
             {
                 progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);
                 break;
@@ -243,7 +246,7 @@ public final class LoadTestRig
             nowNs = clock.nanoTime();
             if (sent == batchSize)
             {
-                batchSize = (int)min(totalNumberOfMessages - sentMessages, burstSize);
+                batchSize = (int)min(totalNumberOfRequests - sentMessages, burstSize);
                 timestampNs += sendIntervalNs;
                 long receivedMessageCount = 0;
                 while (nowNs < timestampNs && nowNs < stopTimeNs)
@@ -254,7 +257,8 @@ public final class LoadTestRig
                         nextReportTimeNs += NANOS_PER_SECOND;
                     }
 
-                    if (receivedMessageCount < sentMessages)
+                    final long expectedResponsesSoFar = sentMessages * totalNumberOfResponses / totalNumberOfRequests;
+                    if (receivedMessageCount < expectedResponsesSoFar)
                     {
                         messageTransceiver.receive();
                         final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -296,9 +300,8 @@ public final class LoadTestRig
 
         idleStrategy.reset();
         long receivedMessageCount = messageTransceiver.receivedMessages();
-        final long expectedReceivedMessageCount = messageTransceiver.expectedReceivedMessages(iterations, messageRate);
         final long deadline = clock.nanoTime() + RECEIVE_DEADLINE_NS;
-        while (receivedMessageCount < expectedReceivedMessageCount)
+        while (receivedMessageCount < totalNumberOfResponses)
         {
             messageTransceiver.receive();
             final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -320,27 +323,30 @@ public final class LoadTestRig
         return new SendResult(sentMessages, receivedMessageCount);
     }
 
-    private void warnIfTargetRateNotAchieved(final SendResult result, final long expectedTotalNumberOfMessages)
+    private void warnIfTargetRateNotAchieved(
+        final SendResult result,
+        final long expectedTotalRequests,
+        final long expectedTotalResponses)
     {
-        if (expectedTotalNumberOfMessages != result.sentMessages)
+        if (expectedTotalRequests != result.sentMessages)
         {
             out.printf(
                 "%n*** WARNING: Target message rate not achieved: expected to send %,d messages in " +
                 "total but managed to send only %,d messages (loss %.4f%%)!%n",
-                expectedTotalNumberOfMessages,
+                expectedTotalRequests,
                 result.sentMessages,
-                100.0 - (100.0 * result.sentMessages / expectedTotalNumberOfMessages));
+                100.0 - (100.0 * result.sentMessages / expectedTotalRequests));
         }
 
-        if (result.sentMessages != result.receivedMessages)
+        if (expectedTotalResponses != result.receivedMessages)
         {
             out.printf(
                 "%n*** WARNING: Not all messages were received after %ds deadline: expected %,d vs received " +
                 "%,d (loss %.4f%%)!%n",
                 NANOSECONDS.toSeconds(RECEIVE_DEADLINE_NS),
-                result.sentMessages,
+                expectedTotalResponses,
                 result.receivedMessages,
-                100.0 - (100.0 * result.receivedMessages / result.sentMessages));
+                100.0 - (100.0 * result.receivedMessages / expectedTotalResponses));
         }
     }
 
@@ -409,9 +415,9 @@ public final class LoadTestRig
             this.receivedMessages = receivedMessages;
         }
 
-        PersistedHistogram.Status status(final long expectedNumberOfMessages)
+        PersistedHistogram.Status status(final long expectedRequests, final long expectedResponses)
         {
-            return expectedNumberOfMessages == sentMessages && expectedNumberOfMessages == receivedMessages ? OK : FAIL;
+            return expectedRequests == sentMessages && expectedResponses == receivedMessages ? OK : FAIL;
         }
     }
 }
