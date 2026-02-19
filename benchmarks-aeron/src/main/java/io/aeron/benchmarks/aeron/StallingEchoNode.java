@@ -157,12 +157,15 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     static final class ReplayMergeRecoveryStrategy implements RecoveryStrategy
     {
         private final AeronArchive archive;
+        private final Subscription mergeSubscription;
         private final String replayChannel;
         private final String replayDestination;
         private final String liveDestination;
         private final long recordingId;
+        long lastArchiveFragments;
+        long lastLiveFragments;
 
-        ReplayMergeRecoveryStrategy()
+        ReplayMergeRecoveryStrategy(final Aeron aeron)
         {
             this.replayChannel = System.getProperty(REPLAY_CHANNEL_PROP);
             this.replayDestination = System.getProperty(REPLAY_DESTINATION_PROP);
@@ -183,9 +186,12 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 .controlRequestStreamId(Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0))
                 .controlResponseChannel(System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP)));
 
+            this.mergeSubscription = aeron.addSubscription(
+                "aeron:udp?control-mode=manual", destinationStreamId());
+
             System.out.printf(
                 "[%s] ReplayMergeRecoveryStrategy: archive connected. " +
-                "recordingId=%d, replayChannel=%s, replayDestination=%s, liveDestination=%s%n",
+                    "recordingId=%d, replayChannel=%s, replayDestination=%s, liveDestination=%s%n",
                 Thread.currentThread().getName(),
                 recordingId,
                 replayChannel,
@@ -210,7 +216,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 threadName, replayChannel, replayDestination, liveDestination);
 
             try (ReplayMerge replayMerge = new ReplayMerge(
-                subscription,
+                mergeSubscription,
                 archive,
                 replayChannel,
                 replayDestination,
@@ -218,7 +224,12 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 recordingId,
                 position))
             {
-                return pollUntilMerged(replayMerge, fragmentHandler, threadName, timeoutNs);
+                final long[] counts = new long[2]; // [0]=archiveFragments, [1]=liveFragments
+                final Image merged = pollUntilMerged(
+                    replayMerge, fragmentHandler, threadName, timeoutNs, counts);
+                lastArchiveFragments = counts[0];
+                lastLiveFragments = counts[1];
+                return merged;
             }
         }
 
@@ -226,13 +237,16 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final ReplayMerge replayMerge,
             final FragmentHandler fragmentHandler,
             final String threadName,
-            final long timeoutNs)
+            final long timeoutNs,
+            final long[] countsOut)
         {
             final long deadlineNs = SystemNanoClock.INSTANCE.nanoTime() + timeoutNs;
             final long logIntervalNs = 1_000_000_000L;
             long lastLogNs = SystemNanoClock.INSTANCE.nanoTime();
             long pollIterations = 0;
-            long fragmentsReceived = 0;
+            long archiveFragments = 0;
+            long liveFragments = 0;
+            boolean inArchivePhase = true;
             boolean imageAcquiredLogged = false;
             boolean liveAddedLogged = false;
 
@@ -242,38 +256,65 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             {
                 final int fragments = replayMerge.poll(fragmentHandler, FRAGMENT_LIMIT);
                 pollIterations++;
-                fragmentsReceived += fragments;
+
+                if (inArchivePhase)
+                {
+                    archiveFragments += fragments;
+                }
+                else
+                {
+                    liveFragments += fragments;
+                }
 
                 imageAcquiredLogged = logImageAcquiredOnce(
                     replayMerge, threadName, pollIterations, imageAcquiredLogged);
-                liveAddedLogged = logLiveAddedOnce(
-                    replayMerge, threadName, fragmentsReceived, pollIterations, liveAddedLogged);
+
+                if (!liveAddedLogged && replayMerge.isLiveAdded())
+                {
+                    final Image img = replayMerge.image();
+                    System.out.printf(
+                        "[%s] ReplayMerge: live destination ADDED — within merge window. " +
+                            "archiveFragments=%,d, imagePosition=%d, iterations=%,d%n",
+                        threadName,
+                        archiveFragments,
+                        img != null ? img.position() : -1L,
+                        pollIterations);
+                    inArchivePhase = false;
+                    liveAddedLogged = true;
+                }
 
                 if (0 == fragments)
                 {
                     final long nowNs = SystemNanoClock.INSTANCE.nanoTime();
-                    checkFailed(replayMerge, threadName, pollIterations, fragmentsReceived,
-                        imageAcquiredLogged, liveAddedLogged);
-                    checkTimeout(replayMerge, threadName, timeoutNs, pollIterations, fragmentsReceived,
-                        imageAcquiredLogged, liveAddedLogged, nowNs, deadlineNs);
+                    checkFailed(replayMerge, threadName, pollIterations,
+                        archiveFragments, liveFragments, imageAcquiredLogged, liveAddedLogged);
+                    checkTimeout(replayMerge, threadName, timeoutNs, pollIterations,
+                        archiveFragments, liveFragments, imageAcquiredLogged, liveAddedLogged,
+                        nowNs, deadlineNs);
 
                     if (nowNs - lastLogNs >= logIntervalNs)
                     {
-                        logProgress(replayMerge, threadName, pollIterations, fragmentsReceived,
-                            imageAcquiredLogged, liveAddedLogged, deadlineNs, nowNs);
+                        logProgress(replayMerge, threadName, pollIterations,
+                            archiveFragments, liveFragments, imageAcquiredLogged, liveAddedLogged,
+                            deadlineNs, nowNs);
                         lastLogNs = nowNs;
                     }
                 }
             }
 
             final Image mergedImage = replayMerge.image();
+            countsOut[0] = archiveFragments;
+            countsOut[1] = liveFragments;
+
             System.out.printf(
                 "[%s] ReplayMerge: MERGED successfully. " +
-                "newImage sessionId=%d, position=%d, fragments=%,d, iterations=%,d%n",
+                    "newImage sessionId=%d, position=%d, " +
+                    "archiveFragments=%,d, liveFragments=%,d, iterations=%,d%n",
                 threadName,
                 mergedImage.sessionId(),
                 mergedImage.position(),
-                fragmentsReceived,
+                archiveFragments,
+                liveFragments,
                 pollIterations);
 
             return mergedImage;
@@ -290,30 +331,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 final Image img = replayMerge.image();
                 System.out.printf(
                     "[%s] ReplayMerge: replay image ACQUIRED — archive replay stream is flowing. " +
-                    "sessionId=%d, position=%d, iterations=%,d%n",
+                        "sessionId=%d, position=%d, iterations=%,d%n",
                     threadName, img.sessionId(), img.position(), pollIterations);
-                return true;
-            }
-            return alreadyLogged;
-        }
-
-        private static boolean logLiveAddedOnce(
-            final ReplayMerge replayMerge,
-            final String threadName,
-            final long fragmentsReceived,
-            final long pollIterations,
-            final boolean alreadyLogged)
-        {
-            if (!alreadyLogged && replayMerge.isLiveAdded())
-            {
-                final Image img = replayMerge.image();
-                System.out.printf(
-                    "[%s] ReplayMerge: live destination ADDED — within merge window. " +
-                    "imagePosition=%d, fragments=%,d, iterations=%,d%n",
-                    threadName,
-                    img != null ? img.position() : -1L,
-                    fragmentsReceived,
-                    pollIterations);
                 return true;
             }
             return alreadyLogged;
@@ -323,16 +342,19 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final ReplayMerge replayMerge,
             final String threadName,
             final long pollIterations,
-            final long fragmentsReceived,
+            final long archiveFragments,
+            final long liveFragments,
             final boolean imageAcquiredLogged,
             final boolean liveAddedLogged)
         {
             if (replayMerge.hasFailed())
             {
                 System.out.printf(
-                    "[%s] ReplayMerge: FAILED. iterations=%,d, fragments=%,d, " +
-                    "imageAcquired=%b, liveAdded=%b%n",
-                    threadName, pollIterations, fragmentsReceived,
+                    "[%s] ReplayMerge: FAILED. iterations=%,d, " +
+                        "archiveFragments=%,d, liveFragments=%,d, " +
+                        "imageAcquired=%b, liveAdded=%b%n",
+                    threadName, pollIterations,
+                    archiveFragments, liveFragments,
                     imageAcquiredLogged, liveAddedLogged);
                 throw new IllegalStateException("ReplayMerge hasFailed()");
             }
@@ -343,7 +365,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final String threadName,
             final long timeoutNs,
             final long pollIterations,
-            final long fragmentsReceived,
+            final long archiveFragments,
+            final long liveFragments,
             final boolean imageAcquiredLogged,
             final boolean liveAddedLogged,
             final long nowNs,
@@ -352,9 +375,11 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             if (nowNs > deadlineNs)
             {
                 System.out.printf(
-                    "[%s] ReplayMerge: TIMED OUT after %,d ms. iterations=%,d, fragments=%,d, " +
-                    "imageAcquired=%b, liveAdded=%b%n",
-                    threadName, timeoutNs / 1_000_000, pollIterations, fragmentsReceived,
+                    "[%s] ReplayMerge: TIMED OUT after %,d ms. iterations=%,d, " +
+                        "archiveFragments=%,d, liveFragments=%,d, " +
+                        "imageAcquired=%b, liveAdded=%b%n",
+                    threadName, timeoutNs / 1_000_000, pollIterations,
+                    archiveFragments, liveFragments,
                     imageAcquiredLogged, liveAddedLogged);
                 throw new IllegalStateException(
                     "Timed out waiting for replay merge after " + timeoutNs / 1_000_000 + " ms");
@@ -365,7 +390,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final ReplayMerge replayMerge,
             final String threadName,
             final long pollIterations,
-            final long fragmentsReceived,
+            final long archiveFragments,
+            final long liveFragments,
             final boolean imageAcquiredLogged,
             final boolean liveAddedLogged,
             final long deadlineNs,
@@ -374,13 +400,15 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final Image img = replayMerge.image();
             System.out.printf(
                 "[%s] ReplayMerge: waiting... imageAcquired=%b, liveAdded=%b, " +
-                "imagePosition=%d, iterations=%,d, fragments=%,d, remainingMs=%,d%n",
+                    "imagePosition=%d, archiveFragments=%,d, liveFragments=%,d, " +
+                    "iterations=%,d, remainingMs=%,d%n",
                 threadName,
                 imageAcquiredLogged,
                 liveAddedLogged,
                 img != null ? img.position() : -1L,
+                archiveFragments,
+                liveFragments,
                 pollIterations,
-                fragmentsReceived,
                 (deadlineNs - nowNs) / 1_000_000);
         }
 
@@ -389,6 +417,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         {
             System.out.printf("[%s] ReplayMergeRecoveryStrategy: closing archive connection%n",
                 Thread.currentThread().getName());
+            closeAll(mergeSubscription);
             archive.close();
         }
     }
@@ -458,7 +487,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
         final RecoveryMode recoveryMode = RecoveryMode.valueOf(
             System.getProperty(RECOVERY_MODE_PROP, RecoveryMode.GAP.name()));
-        this.recoveryStrategy = createRecoveryStrategy(recoveryMode);
+        this.recoveryStrategy = createRecoveryStrategy(recoveryMode, aeron);
 
         System.out.println("pauseMs: " + Long.getLong(PAUSE_MS_PROP, 0));
         System.out.println("pauseEveryMs: " + Long.getLong(PAUSE_EVERY_MS_PROP, 0));
@@ -493,14 +522,14 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         };
     }
 
-    private static RecoveryStrategy createRecoveryStrategy(final RecoveryMode mode)
+    private static RecoveryStrategy createRecoveryStrategy(final RecoveryMode mode, final Aeron aeron)
     {
         switch (mode)
         {
             case GAP:
                 return new GapAcceptanceRecoveryStrategy();
             case REPLAY_MERGE:
-                return new ReplayMergeRecoveryStrategy();
+                return new ReplayMergeRecoveryStrategy(aeron);
             case REPLAY_MERGE_V2:
                 return new ReplayMergeV2RecoveryStrategy();
             default:
@@ -528,6 +557,9 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             threadName, image.sessionId(), image.position(), image.mtuLength(), image.correlationId());
 
         long totalMessagesEchoed = 0;
+        long liveMessagesThisRun = 0;
+        long totalLiveMessages = 0;
+        long totalArchiveMessages = 0;
         long stallCount = 0;
         int recoveryAttempts = 0;
         long nextStallDeadlineNs = stallingEnabled ? System.nanoTime() + pauseEveryNs : Long.MAX_VALUE;
@@ -539,6 +571,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             if (fragments > 0)
             {
                 totalMessagesEchoed += fragments;
+                liveMessagesThisRun += fragments;
                 if (stallingEnabled && System.nanoTime() >= nextStallDeadlineNs)
                 {
                     stallCount++;
@@ -550,21 +583,49 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             {
                 if (!running.get())
                 {
+                    totalLiveMessages += liveMessagesThisRun;
                     System.out.printf(
                         "[%s] Shutdown signal received. Exiting. " +
-                        "totalMessagesEchoed=%,d, stallCount=%,d, recoveryAttempts=%d%n",
-                        threadName, totalMessagesEchoed, stallCount, recoveryAttempts);
+                            "totalMessagesEchoed=%,d, liveMessages=%,d, archiveMessages=%,d, " +
+                            "stallCount=%,d, recoveryAttempts=%d%n",
+                        threadName, totalMessagesEchoed, totalLiveMessages, totalArchiveMessages,
+                        stallCount, recoveryAttempts);
                     return;
                 }
 
                 if (image.isClosed())
                 {
+                    totalLiveMessages += liveMessagesThisRun;
+                    System.out.printf(
+                        "[%s] Live phase ending: liveMessagesThisRun=%,d, " +
+                            "totalLive=%,d, totalArchive=%,d, total=%,d%n",
+                        threadName, liveMessagesThisRun,
+                        totalLiveMessages, totalArchiveMessages, totalMessagesEchoed);
+                    liveMessagesThisRun = 0;
+
                     image = doRecovery(image, threadName, totalMessagesEchoed, stallCount,
-                        ++recoveryAttempts);
+                        ++recoveryAttempts, totalLiveMessages, totalArchiveMessages);
                     if (null == image)
                     {
                         return;
                     }
+
+                    if (recoveryStrategy instanceof ReplayMergeRecoveryStrategy)
+                    {
+                        final ReplayMergeRecoveryStrategy rm =
+                            (ReplayMergeRecoveryStrategy) recoveryStrategy;
+                        final long archiveDelta = rm.lastArchiveFragments;
+                        final long liveDelta = rm.lastLiveFragments;
+                        totalArchiveMessages += archiveDelta;
+                        totalMessagesEchoed += archiveDelta + liveDelta;
+                        System.out.printf(
+                            "[%s] Merge #%d counters: archiveDelta=%,d, liveDelta=%,d, " +
+                                "totalArchive=%,d, totalLive=%,d, total=%,d%n",
+                            threadName, recoveryAttempts,
+                            archiveDelta, liveDelta,
+                            totalArchiveMessages, totalLiveMessages, totalMessagesEchoed);
+                    }
+
                     nextStallDeadlineNs = System.nanoTime() + pauseEveryNs;
                 }
             }
@@ -582,7 +643,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     {
         System.out.printf(
             "[%s] Stall #%,d triggered: pausing for %,d ms, " +
-            "totalMessagesEchoed=%,d, imagePosition=%d%n",
+                "totalMessagesEchoed=%,d, imagePosition=%d%n",
             threadName, stallCount, pauseNs / 1_000_000, totalMessagesEchoed, imagePosition);
 
         final long stallDeadlineNs = System.nanoTime() + pauseNs;
@@ -602,12 +663,14 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         final String threadName,
         final long totalMessagesEchoed,
         final long stallCount,
-        final int recoveryAttempt)
+        final int recoveryAttempt,
+        final long totalLiveMessages,
+        final long totalArchiveMessages)
     {
         final long lostPosition = lostImage.position();
         System.out.printf(
             "[%s] Image CLOSED (lost): sessionId=%d, position=%d, " +
-            "totalMessagesEchoed=%,d, stallCount=%,d, recoveryAttempt=%d%n",
+                "totalMessagesEchoed=%,d, stallCount=%,d, recoveryAttempt=%d%n",
             threadName, lostImage.sessionId(), lostPosition,
             totalMessagesEchoed, stallCount, recoveryAttempt);
         System.out.printf("[%s] Attempting recovery via: %s%n",
@@ -621,14 +684,14 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         {
             System.out.printf(
                 "[%s] Recovery #%d returned null — no image available, exiting. " +
-                "elapsedMs=%,d, totalMessagesEchoed=%,d%n",
+                    "elapsedMs=%,d, totalMessagesEchoed=%,d%n",
                 threadName, recoveryAttempt, recoveryElapsedMs, totalMessagesEchoed);
             return null;
         }
 
         System.out.printf(
             "[%s] Recovery #%d SUCCESSFUL: newImage sessionId=%d, " +
-            "position=%d, gapBytes=%,d, elapsedMs=%,d%n",
+                "position=%d, gapBytes=%,d, elapsedMs=%,d%n",
             threadName, recoveryAttempt, newImage.sessionId(),
             newImage.position(), newImage.position() - lostPosition, recoveryElapsedMs);
 
