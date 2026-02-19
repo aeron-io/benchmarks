@@ -19,6 +19,8 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.FragmentAssembler;
 import io.aeron.Subscription;
+import io.aeron.archive.client.AeronArchive;
+import io.aeron.archive.codecs.SourceLocation;
 import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
@@ -37,6 +39,9 @@ import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
 import static io.aeron.benchmarks.aeron.AeronUtil.*;
+import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_CHANNEL_PROP;
+import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP;
+import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_STREAM_PROP;
 
 /**
  * Message transceiver for fan-out benchmarks: one publication, N subscriptions.
@@ -46,15 +51,9 @@ import static io.aeron.benchmarks.aeron.AeronUtil.*;
  * subscribes to all N reply channels and records per-receiver latency histograms
  * via {@link PersistedHistogramSet}.
  * <p>
- * The base class {@code valueRecorder} receives an aggregate of all receiver latencies
- * (via {@link #onMessageReceived}) and is ignored. The per-receiver recorders in the
- * {@link PersistedHistogramSet} are the meaningful output.
- * <p>
- * Configuration:
- * <ul>
- *     <li>Singular destination channel/stream — the single outbound publication</li>
- *     <li>Plural source channels/streams — the N inbound reply subscriptions</li>
- * </ul>
+ * If archive control channel properties are configured, starts a recording on the
+ * outbound publication channel via {@code aeron-spy} so the archive captures all
+ * traffic for replay-merge recovery scenarios.
  */
 public final class EchoFanOutMessageTransceiver extends MessageTransceiver
 {
@@ -70,6 +69,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
     private Subscription[] subscriptions;
     private FragmentHandler[] fragmentHandlers;
     private int numReceivers;
+    private AeronArchive aeronArchive;
+    private long recordingSubscriptionId = -1;
 
     public EchoFanOutMessageTransceiver(final NanoClock nanoClock, final PersistedHistogramSet histogramSet)
     {
@@ -144,6 +145,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         remainingConnectTimeoutNs -= SystemNanoClock.INSTANCE.nanoTime() - startNs;
         System.out.println("  publication connected (remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms)");
 
+        startArchiveRecording();
+
         for (int i = 0; i < numReceivers; i++)
         {
             System.out.println("  awaiting subscription[" + i + "] " +
@@ -163,14 +166,55 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         System.out.println("  all connected");
     }
 
+    private void startArchiveRecording()
+    {
+        final String controlChannel = System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP);
+        if (null == controlChannel)
+        {
+            System.out.println("  archive control channel not configured, skipping recording");
+            return;
+        }
+
+        final int controlStream = Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0);
+        final String responseChannel = System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP);
+
+        System.out.println("  connecting to archive: " + controlChannel);
+        aeronArchive = AeronArchive.connect(new AeronArchive.Context()
+            .aeron(aeron)
+            .controlRequestChannel(controlChannel)
+            .controlRequestStreamId(controlStream)
+            .controlResponseChannel(responseChannel));
+
+        final String spyChannel = "aeron-spy:" + destinationChannel();
+        final int stream = destinationStreamId();
+
+        System.out.println("  starting recording: channel=" + spyChannel + " stream=" + stream);
+        recordingSubscriptionId = aeronArchive.startRecording(spyChannel, stream, SourceLocation.LOCAL);
+        System.out.println("  recording started: subscriptionId=" + recordingSubscriptionId);
+    }
+
     public void destroy()
     {
+        if (recordingSubscriptionId >= 0 && null != aeronArchive)
+        {
+            try
+            {
+                aeronArchive.stopRecording(recordingSubscriptionId);
+                System.out.println("  recording stopped: subscriptionId=" + recordingSubscriptionId);
+            }
+            catch (final Exception ex)
+            {
+                System.err.println("  failed to stop recording: " + ex.getMessage());
+            }
+        }
+
         final String prefix = "fan-out-client-";
         AeronUtil.dumpAeronStats(
             aeron.context().cncFile(),
             logsDir.resolve(prefix + "aeron-stat.txt"),
             logsDir.resolve(prefix + "errors.txt"));
 
+        closeAll(aeronArchive);
         closeAll(subscriptions);
         closeAll(publication);
 
