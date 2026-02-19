@@ -19,6 +19,7 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
 import io.aeron.Subscription;
+import io.aeron.ChannelUriStringBuilder;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.client.ReplayMerge;
 import io.aeron.benchmarks.Configuration;
@@ -77,7 +78,6 @@ import static org.agrona.PropertyAction.REPLACE;
  *   <li>{@code stalling.echo.archive.control.response.channel} - archive control response channel</li>
  *   <li>{@code stalling.echo.replay.channel} - channel for replay</li>
  *   <li>{@code stalling.echo.replay.destination} - replay destination (e.g. localhost:0)</li>
- *   <li>{@code stalling.echo.live.destination} - live destination</li>
  *   <li>{@code stalling.echo.recording.id} - recording id to replay from</li>
  * </ul>
  */
@@ -92,7 +92,6 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         "stalling.echo.archive.control.response.channel";
     static final String REPLAY_CHANNEL_PROP = "stalling.echo.replay.channel";
     static final String REPLAY_DESTINATION_PROP = "stalling.echo.replay.destination";
-    static final String LIVE_DESTINATION_PROP = "stalling.echo.live.destination";
     static final String RECORDING_ID_PROP = "stalling.echo.recording.id";
 
     // -------------------------------------------------------------------------
@@ -158,18 +157,16 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     {
         private final AeronArchive archive;
         private final Subscription mergeSubscription;
-        private final String replayChannel;
+        private final String replayChannelBase;
         private final String replayDestination;
-        private final String liveDestination;
         private final long recordingId;
         long lastArchiveFragments;
         long lastLiveFragments;
 
         ReplayMergeRecoveryStrategy(final Aeron aeron)
         {
-            this.replayChannel = System.getProperty(REPLAY_CHANNEL_PROP);
+            this.replayChannelBase = System.getProperty(REPLAY_CHANNEL_PROP);
             this.replayDestination = System.getProperty(REPLAY_DESTINATION_PROP);
-            this.liveDestination = System.getProperty(LIVE_DESTINATION_PROP);
             this.recordingId = Long.getLong(RECORDING_ID_PROP, 0);
 
             System.out.printf("[%s] ReplayMergeRecoveryStrategy: connecting to archive...%n",
@@ -191,12 +188,12 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
             System.out.printf(
                 "[%s] ReplayMergeRecoveryStrategy: archive connected. " +
-                    "recordingId=%d, replayChannel=%s, replayDestination=%s, liveDestination=%s%n",
+                    "recordingId=%d, replayChannelBase=%s, replayDestination=%s, liveDestination=%s%n",
                 Thread.currentThread().getName(),
                 recordingId,
-                replayChannel,
+                replayChannelBase,
                 replayDestination,
-                liveDestination);
+                destinationChannel());
         }
 
         @Override
@@ -208,19 +205,35 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final String threadName = Thread.currentThread().getName();
             final long timeoutNs = connectionTimeoutNs();
 
+            final int[] sessionIdHolder = new int[1];
+            final int found = archive.listRecording(
+                recordingId,
+                (controlSessionId, correlationId, recordingId1, startTimestamp, stopTimestamp,
+                 startPosition, stopPosition, initialTermId, segmentFileLength, termBufferLength,
+                 mtuLength, sessionId, streamId, strippedChannel, originalChannel, sourceIdentity) ->
+                    sessionIdHolder[0] = sessionId);
+            if (found == 0)
+            {
+                throw new IllegalStateException("Recording not found for recordingId=" + recordingId);
+            }
+            final int recordingSessionId = sessionIdHolder[0];
+            final String replayChannel = new ChannelUriStringBuilder(replayChannelBase)
+                .sessionId(recordingSessionId)
+                .build();
+
             System.out.printf(
-                "[%s] ReplayMerge: initiating from recordingId=%d at position=%d, timeoutMs=%,d%n",
-                threadName, recordingId, position, timeoutNs / 1_000_000);
+                "[%s] ReplayMerge: initiating from recordingId=%d, recordingSessionId=%d at position=%d, timeoutMs=%,d%n",
+                threadName, recordingId, recordingSessionId, position, timeoutNs / 1_000_000);
             System.out.printf(
                 "[%s] ReplayMerge:   replayChannel=%s, replayDestination=%s, liveDestination=%s%n",
-                threadName, replayChannel, replayDestination, liveDestination);
+                threadName, replayChannel, replayDestination, destinationChannel());
 
             try (ReplayMerge replayMerge = new ReplayMerge(
                 mergeSubscription,
                 archive,
                 replayChannel,
                 replayDestination,
-                liveDestination,
+                destinationChannel(),
                 recordingId,
                 position))
             {
@@ -254,7 +267,6 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
             while (!replayMerge.isMerged())
             {
-
                 final int fragments = replayMerge.poll(fragmentHandler, FRAGMENT_LIMIT);
                 pollIterations++;
 
@@ -307,19 +319,16 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             countsOut[0] = archiveFragments;
             countsOut[1] = liveFragments;
 
-            System.out.println("replay merge: "+replayMerge);
-
             System.out.printf(
                 "[%s] ReplayMerge: MERGED successfully. " +
                     "newImage sessionId=%d, position=%d, " +
-                    "archiveFragments=%,d, liveFragments=%,d, iterations=%,d%n %b",
+                    "archiveFragments=%,d, liveFragments=%,d, iterations=%,d%n",
                 threadName,
                 mergedImage.sessionId(),
                 mergedImage.position(),
                 archiveFragments,
                 liveFragments,
-                pollIterations,
-                replayMerge.hasFailed());
+                pollIterations);
 
             return mergedImage;
         }
@@ -402,11 +411,10 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final long nowNs)
         {
             final Image img = replayMerge.image();
-
             System.out.printf(
                 "[%s] ReplayMerge: waiting... imageAcquired=%b, liveAdded=%b, " +
                     "imagePosition=%d, archiveFragments=%,d, liveFragments=%,d, " +
-                    "iterations=%,d, remainingMs=%,d%n",
+                    "iterations=%,d, remainingMs=%,d%n%s%n",
                 threadName,
                 imageAcquiredLogged,
                 liveAddedLogged,
@@ -414,8 +422,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 archiveFragments,
                 liveFragments,
                 pollIterations,
-                (deadlineNs - nowNs) / 1_000_000);
-            System.out.println("replay merge status "+replayMerge);
+                (deadlineNs - nowNs) / 1_000_000,
+                replayMerge);
         }
 
         @Override
