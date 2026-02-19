@@ -254,6 +254,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
             while (!replayMerge.isMerged())
             {
+
                 final int fragments = replayMerge.poll(fragmentHandler, FRAGMENT_LIMIT);
                 pollIterations++;
 
@@ -306,16 +307,19 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             countsOut[0] = archiveFragments;
             countsOut[1] = liveFragments;
 
+            System.out.println("replay merge: "+replayMerge);
+
             System.out.printf(
                 "[%s] ReplayMerge: MERGED successfully. " +
                     "newImage sessionId=%d, position=%d, " +
-                    "archiveFragments=%,d, liveFragments=%,d, iterations=%,d%n",
+                    "archiveFragments=%,d, liveFragments=%,d, iterations=%,d%n %b",
                 threadName,
                 mergedImage.sessionId(),
                 mergedImage.position(),
                 archiveFragments,
                 liveFragments,
-                pollIterations);
+                pollIterations,
+                replayMerge.hasFailed());
 
             return mergedImage;
         }
@@ -398,6 +402,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             final long nowNs)
         {
             final Image img = replayMerge.image();
+
             System.out.printf(
                 "[%s] ReplayMerge: waiting... imageAcquired=%b, liveAdded=%b, " +
                     "imagePosition=%d, archiveFragments=%,d, liveFragments=%,d, " +
@@ -410,6 +415,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 liveFragments,
                 pollIterations,
                 (deadlineNs - nowNs) / 1_000_000);
+            System.out.println("replay merge status "+replayMerge);
         }
 
         @Override
