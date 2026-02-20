@@ -121,7 +121,10 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
             subscriptions[i] = aeron.addSubscription(srcChannels[i], srcStreams[i]);
             System.out.println("  subscription[" + i + "] created");
 
-            final ValueRecorder recorder = histogramSet.create("receiver-" + i).valueRecorder();
+            String name = "receiver-" + i;
+            final ValueRecorder recorder = histogramSet.create(name).valueRecorder();
+            System.out.println("value recordered created: "+name);
+
             fragmentHandlers[i] = new FragmentAssembler(
                 (buffer, offset, length, header) ->
                 {

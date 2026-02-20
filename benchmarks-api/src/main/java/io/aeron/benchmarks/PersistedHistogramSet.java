@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
+import static io.aeron.benchmarks.PersistedHistogram.saveToFile;
 
 /**
  * A set that creates and tracks named {@link PersistedHistogram} instances.
@@ -124,10 +125,13 @@ public final class PersistedHistogramSet
      */
     public void saveAll(final Path outputDirectory, final PersistedHistogram.Status status) throws IOException
     {
+        System.out.println("saveAll:");
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
             final PersistedHistogram histogram = entry.getValue();
             final String name = entry.getKey();
+            System.out.println("    Saving to file: dir: "+outputDirectory+" name: "+name+" status: "+status);
+
             histogram.saveToFile(outputDirectory, name, status);
         }
     }
