@@ -39,9 +39,9 @@ import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
 import static io.aeron.benchmarks.aeron.AeronUtil.*;
-import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_CHANNEL_PROP;
-import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP;
-import static io.aeron.benchmarks.aeron.StallingEchoNode.ARCHIVE_CONTROL_STREAM_PROP;
+import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_CHANNEL_PROP;
+import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP;
+import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_STREAM_PROP;
 
 /**
  * Message transceiver for fan-out benchmarks: one publication, N subscriptions.

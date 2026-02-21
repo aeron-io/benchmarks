@@ -64,29 +64,24 @@ import static org.agrona.PropertyAction.REPLACE;
  * Recovery modes:
  *   GAP          - accept the gap, wait for a new image
  *   REPLAY_MERGE - replay from archive and merge back to live
- *   REPLAY_MERGE_V2 - not yet implemented
  *
  * Subscription lifecycle (REPLAY_MERGE mode):
- *   1. liveSubscription starts as the initial multicast subscription.
- *   2. When its image closes: liveSubscription is closed, state -> RECOVERING.
- *   3. A fresh mergeSubscription is created for ReplayMerge.
- *   4. When isMerged(): ReplayMerge wrapper is closed; mergeSubscription is promoted
- *      to liveSubscription (it now carries the live image). state -> LIVE.
- *   5. When that image closes: repeat from step 2.
- *   One subscription is active at any time; each subscription is closed when its image closes.
+ *   A single liveSubscription is created once and reused for the lifetime of the node.
+ *   Each recovery creates a new ReplayMerge against the same subscription.
+ *   When isMerged(), the ReplayMerge wrapper is closed and we transition back to LIVE.
  */
-public final class StallingEchoNode implements AutoCloseable, Runnable
+public final class RecoveringEchoNode implements AutoCloseable, Runnable
 {
-    static final String PAUSE_MS_PROP                         = "stalling.echo.pause.ms";
-    static final String PAUSE_EVERY_MS_PROP                   = "stalling.echo.pause.every.ms";
-    static final String RECOVERY_MODE_PROP                    = "stalling.echo.recovery.mode";
-    static final String ARCHIVE_CONTROL_CHANNEL_PROP          = "stalling.echo.archive.control.channel";
-    static final String ARCHIVE_CONTROL_STREAM_PROP           = "stalling.echo.archive.control.stream";
+    static final String PAUSE_MS_PROP                         = "recovering.echo.pause.ms";
+    static final String PAUSE_EVERY_MS_PROP                   = "recovering.echo.pause.every.ms";
+    static final String RECOVERY_MODE_PROP                    = "recovering.echo.recovery.mode";
+    static final String ARCHIVE_CONTROL_CHANNEL_PROP          = "recovering.echo.archive.control.channel";
+    static final String ARCHIVE_CONTROL_STREAM_PROP           = "recovering.echo.archive.control.stream";
     static final String ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP =
-        "stalling.echo.archive.control.response.channel";
-    static final String REPLAY_CHANNEL_PROP                   = "stalling.echo.replay.channel";
-    static final String REPLAY_DESTINATION_PROP               = "stalling.echo.replay.destination";
-    static final String RECORDING_ID_PROP                     = "stalling.echo.recording.id";
+        "recovering.echo.archive.control.response.channel";
+    static final String REPLAY_CHANNEL_PROP                   = "recovering.echo.replay.channel";
+    static final String REPLAY_DESTINATION_PROP               = "recovering.echo.replay.destination";
+    static final String RECORDING_ID_PROP                     = "recovering.echo.recording.id";
 
     private static final long LOG_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1);
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter
@@ -130,14 +125,11 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     private long nextStallDeadlineNs = Long.MAX_VALUE;
     private long stallDeadlineNs     = 0;
 
-    // The subscription that owns `image`. Initially the multicast subscription; after each
-    // recovery it is the promoted mergeSubscription. Closed when its image closes.
-    private Subscription liveSubscription;
+    // Single subscription reused for the lifetime of the node.
+    private final Subscription liveSubscription;
 
-    // Exists only while a ReplayMerge is in progress. On merge completion, promoted to
-    // liveSubscription; replayMerge wrapper is closed and nulled.
-    private ReplayMerge  replayMerge;
-    private Subscription mergeSubscription;
+    // Exists only while a ReplayMerge is in progress. Closed and nulled on merge completion.
+    private ReplayMerge replayMerge;
 
     private long lostPosition;
     private long recoveryStartNs;
@@ -172,12 +164,12 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     // Constructor
     // -------------------------------------------------------------------------
 
-    StallingEchoNode(final AtomicBoolean running)
+    RecoveringEchoNode(final AtomicBoolean running)
     {
         this(running, launchEmbeddedMediaDriverIfConfigured(), connect(), true, receiverIndex());
     }
 
-    StallingEchoNode(
+    RecoveringEchoNode(
         final AtomicBoolean running,
         final MediaDriver mediaDriver,
         final Aeron aeron,
@@ -361,11 +353,6 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
             totalLiveMessages        += currentLivePhaseMessages;
             currentLivePhaseMessages  = 0;
 
-            // Image is gone — close the subscription that owned it.
-            // A fresh mergeSubscription will be created for the next ReplayMerge.
-            closeAll(liveSubscription);
-            liveSubscription = null;
-
             state = State.RECOVERING;
             return 1;
         }
@@ -414,8 +401,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
     {
         switch (recoveryMode)
         {
-            case GAP:             return doRecoveryGap();
-            case REPLAY_MERGE:    return doRecoveryReplayMerge();
+            case GAP:          return doRecoveryGap();
+            case REPLAY_MERGE: return doRecoveryReplayMerge();
             case REPLAY_MERGE_V2: return doRecoveryReplayMergeV2();
             default:
                 throw new IllegalStateException("Unknown recovery mode: " + recoveryMode);
@@ -428,11 +415,6 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
     private int doRecoveryGap()
     {
-        if (liveSubscription == null)
-        {
-            liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
-        }
-
         if (liveSubscription.imageCount() > 0)
         {
             image = liveSubscription.imageAtIndex(0);
@@ -531,16 +513,8 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 recoveryAttempts, recordingId, recordingSessionId,
                 replayChannel, replayDestination, destinationChannel());
 
-            mergeSubscription = aeron.addSubscription(
-                new ChannelUriStringBuilder()
-                    .media("udp")
-                    .controlMode("manual")
-                    .sessionId(recordingSessionId)
-                    .build(),
-                destinationStreamId());
-
             replayMerge = new ReplayMerge(
-                mergeSubscription,
+                liveSubscription,
                 aeronArchive,
                 replayChannel,
                 replayDestination,
@@ -596,7 +570,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
         if (replayMerge.isMerged())
         {
-            final Image mergedImage = mergeSubscription.imageAtIndex(0);
+            final Image mergedImage = replayMerge.image();
             final long elapsedMs    = (System.nanoTime() - recoveryStartNs) / 1_000_000;
 
             log("RECOVERING #%d (REPLAY_MERGE): MERGED. " +
@@ -617,14 +591,10 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                 recoveryArchiveFragments, recoveryLiveFragments,
                 totalArchiveMessages, totalLiveMessages, totalMessagesEchoed);
 
-            // Close only the ReplayMerge wrapper — mergeSubscription stays open.
-            // Promote mergeSubscription to liveSubscription: it now carries the live image.
+            image = mergedImage;
+
             replayMerge.close();
             replayMerge = null;
-
-            image             = mergedImage;
-            liveSubscription  = mergeSubscription;
-            mergeSubscription = null;
 
             currentLivePhaseMessages = 0;
             nextStallDeadlineNs      = stallingEnabled ? System.nanoTime() + pauseEveryNs : Long.MAX_VALUE;
@@ -676,7 +646,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
                         stateDetails = String.format(
                             "mode=GAP, lostPosition=%d, waitingForImage=%b",
                             lostPosition,
-                            liveSubscription == null || liveSubscription.imageCount() == 0);
+                            liveSubscription.imageCount() == 0);
                         break;
 
                     case REPLAY_MERGE:
@@ -746,13 +716,12 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
 
     public void close()
     {
-        log("StallingEchoNode: closing");
+        log("RecoveringEchoNode: closing");
         if (replayMerge != null)
         {
             replayMerge.close();
             replayMerge = null;
         }
-        closeAll(mergeSubscription);
         closeAll(aeronArchive);
         closeAll(liveSubscription);
         closeAll(publication);
@@ -761,7 +730,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         {
             closeAll(aeron, mediaDriver);
         }
-        log("StallingEchoNode: closed");
+        log("RecoveringEchoNode: closed");
     }
 
     // -------------------------------------------------------------------------
@@ -778,7 +747,7 @@ public final class StallingEchoNode implements AutoCloseable, Runnable
         try (
             ShutdownSignalBarrier shutdownSignalBarrier =
                 new ShutdownSignalBarrier(() -> running.set(false));
-            StallingEchoNode node = new StallingEchoNode(running))
+            RecoveringEchoNode node = new RecoveringEchoNode(running))
         {
             Thread.currentThread().setName("echo-" + receiverIndex);
 
