@@ -201,7 +201,7 @@ public final class LoadTestRig
             warnIfTargetRateNotAchieved(result, expectedTotalRequests, expectedTotalResponses);
 
             final PersistedHistogram.Status status = result.status(expectedTotalRequests, expectedTotalResponses);
-            histogramSet.saveAll(configuration.outputDirectory(), status);
+
         }
         finally
         {

@@ -154,15 +154,10 @@ public interface PersistedHistogram extends AutoCloseable
     @SuppressWarnings("checkstyle:indentation")
     static PersistedHistogram newPersistedHistogram(final Configuration configuration)
     {
-        try
-        {
-            return configuration.trackHistory() ?
-                new LoggingPersistedHistogram(configuration.outputDirectory(), new SingleWriterRecorder(3)) :
-                new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), 3));
-        }
-        catch (final IOException ex)
-        {
-            throw new RuntimeException(ex);
-        }
+
+        return configuration.trackHistory() ?
+            new LoggingPersistedHistogram(configuration.outputDirectory(), new SingleWriterRecorder(3)) :
+            new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), 3));
+
     }
 }

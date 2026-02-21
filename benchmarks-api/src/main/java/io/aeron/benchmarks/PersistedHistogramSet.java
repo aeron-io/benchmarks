@@ -15,6 +15,8 @@
  */
 package io.aeron.benchmarks;
 
+import org.HdrHistogram.Histogram;
+import org.HdrHistogram.SingleWriterRecorder;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.CloseHelper;
 
@@ -23,9 +25,9 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
-import static io.aeron.benchmarks.PersistedHistogram.saveToFile;
+import static java.util.concurrent.TimeUnit.HOURS;
 
 /**
  * A set that creates and tracks named {@link PersistedHistogram} instances.
@@ -54,7 +56,7 @@ public final class PersistedHistogramSet
      * Used for backward compatibility with constructors that receive a single histogram.
      *
      * @param outputNamePrefix outputNamePrefix
-     * @param histogram the existing histogram.
+     * @param histogram        the existing histogram.
      * @return a factory containing the histogram under the name "result".
      */
     public static PersistedHistogramSet wrap(final String outputNamePrefix, final PersistedHistogram histogram)
@@ -70,7 +72,7 @@ public final class PersistedHistogramSet
      * @param name the name used as the file prefix when saving. Must be unique.
      * @return a {@link ValueRecorder} that records into the named histogram.
      * @throws IllegalArgumentException if a histogram with the same name already exists.
-     * @throws IllegalStateException if factory was created via {@link #wrap} (no configuration available).
+     * @throws IllegalStateException    if factory was created via {@link #wrap} (no configuration available).
      */
     public PersistedHistogram create(final String name)
     {
@@ -84,7 +86,19 @@ public final class PersistedHistogramSet
             throw new IllegalArgumentException("Histogram already exists: " + name);
         }
 
-        final PersistedHistogram histogram = newPersistedHistogram(configuration);
+        PersistedHistogram result;
+        int numberOfSignificantValueDigits = 3;
+        if (configuration.trackHistory())
+        {
+            SingleWriterRecorder recorder = new SingleWriterRecorder(numberOfSignificantValueDigits);
+            result = new LoggingPersistedHistogram(configuration.outputDirectory(), name, recorder);
+        }
+        else
+        {
+            result = new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), numberOfSignificantValueDigits));
+        }
+
+        final PersistedHistogram histogram = result;
         histograms.put(name, histogram);
         return histogram;
     }
@@ -130,7 +144,7 @@ public final class PersistedHistogramSet
         {
             final PersistedHistogram histogram = entry.getValue();
             final String name = entry.getKey();
-            System.out.println("    Saving to file: dir: "+outputDirectory+" name: "+name+" status: "+status);
+            System.out.println("    Saving to file: dir: " + outputDirectory + " name: " + name + " status: " + status);
 
             histogram.saveToFile(outputDirectory, name, status);
         }
