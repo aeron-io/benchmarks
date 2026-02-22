@@ -37,7 +37,7 @@ abstract class MessageTransceiverLhsPadding
 
 abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 {
-    static final AtomicLongFieldUpdater<MessageTransceiverHotFields> RECEIVED_MESSAGES_UPDATER =
+    public static final AtomicLongFieldUpdater<MessageTransceiverHotFields> RECEIVED_MESSAGES_UPDATER =
         AtomicLongFieldUpdater.newUpdater(MessageTransceiverHotFields.class, "receivedMessages");
     protected final NanoClock clock;
     final ValueRecorder valueRecorder;

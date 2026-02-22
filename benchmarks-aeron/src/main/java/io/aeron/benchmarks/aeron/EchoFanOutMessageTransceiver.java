@@ -24,6 +24,7 @@ import io.aeron.archive.codecs.SourceLocation;
 import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
+import org.HdrHistogram.Histogram;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.collections.MutableInteger;
 import org.agrona.concurrent.NanoClock;
@@ -42,6 +43,8 @@ import static io.aeron.benchmarks.aeron.AeronUtil.*;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_CHANNEL_PROP;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_STREAM_PROP;
+
+// todo: reset is missing
 
 /**
  * Message transceiver for fan-out benchmarks: one publication, N subscriptions.
@@ -84,11 +87,36 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         final Aeron aeron,
         final boolean ownsAeronClient)
     {
-        super(nanoClock, histogramSet.create("result").valueRecorder());
+        super(nanoClock, new DummyValueRecorder());
         this.histogramSet = histogramSet;
         this.mediaDriver = mediaDriver;
         this.aeron = aeron;
         this.ownsAeronClient = ownsAeronClient;
+    }
+
+    public static class DummyValueRecorder implements ValueRecorder{
+        @Override
+        public void recordValue(long value) throws ArrayIndexOutOfBoundsException
+        {
+            throw new RuntimeException();
+        }
+
+        @Override
+        public void recordValueWithCount(long value, long count) throws ArrayIndexOutOfBoundsException
+        {
+            throw new RuntimeException();
+        }
+
+        @Override
+        public void recordValueWithExpectedInterval(long value, long expectedIntervalBetweenValueSamples) throws ArrayIndexOutOfBoundsException
+        {
+            throw new RuntimeException();
+        }
+
+        @Override
+        public void reset()
+        {
+        }
     }
 
     public void init(final Configuration configuration)
@@ -132,7 +160,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
                     final long checksum = buffer.getLong(offset + length - SIZE_OF_LONG, LITTLE_ENDIAN);
                     final long now = clock.nanoTime();
                     recorder.recordValue(now - timestamp);
-                    onMessageReceived(timestamp, checksum);
+                    RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
+//                    onMessageReceived(timestamp, checksum);
                 });
         }
 

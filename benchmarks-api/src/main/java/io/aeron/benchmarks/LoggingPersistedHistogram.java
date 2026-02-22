@@ -21,7 +21,7 @@ import org.HdrHistogram.HistogramLogWriter;
 import org.HdrHistogram.SingleWriterRecorder;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.concurrent.EpochClock;
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
+import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.SystemEpochClock;
 
 import java.io.File;
@@ -29,9 +29,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Objects.requireNonNull;
@@ -51,6 +53,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 {
     private static final int SIGNIFICANT_DIGITS = 3;
     private static final double[] CSV_PERCENTILES = {50.0, 99.0, 99.9, 99.99, 99.999, 100.0};
+    static final long TIMEOUT_MS = TimeUnit.SECONDS.toMillis(10);
+    private static final EpochClock EPOCH_CLOCK = SystemEpochClock.INSTANCE;
 
     private final SingleWriterRecorder recorder;
     private final HistogramState state;
@@ -78,19 +82,21 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
         this.recorder = recorder;
         this.state = new HistogramState(
-            new File(outputDirectory.toFile(), prefix + ".hdr"),
+            new File(outputDirectory.toFile(), prefix + FILE_EXTENSION),
             recorder);
-        BackgroundLogger.INSTANCE.register(state);
+        BackgroundLogger.INSTANCE.syncRegister(state);
     }
 
     public void outputPercentileDistribution(final PrintStream printStream, final double outputValueUnitScalingRatio)
     {
-        final Histogram histogram = state.syncAggregate();
+        final Histogram histogram = BackgroundLogger.INSTANCE.syncAggregate(state);
         histogram.outputPercentileDistribution(printStream, outputValueUnitScalingRatio);
     }
 
     public Path saveToFile(final Path outputDirectory, final String namePrefix, final Status status) throws IOException
     {
+        System.out.println("saveToFile: "+outputDirectory);
+
         requireNonNull(outputDirectory);
 
         final String prefix = namePrefix.trim();
@@ -99,14 +105,22 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             throw new IllegalArgumentException("Name prefix cannot be blank!");
         }
 
-        // Terminal operation: deregister, flush last interval, close writer
-        final Histogram finalAggregate = BackgroundLogger.INSTANCE.deregister(state);
+        BackgroundLogger.INSTANCE.syncDeregister(state);
 
-        final Path csvPath = outputDirectory.resolve(
+        Path result = state.file.toPath();
+
+        if (status == Status.FAIL)
+        {
+            final Path failPath = state.file.toPath().resolveSibling(state.file.getName() + FAILED_FILE_SUFFIX);
+            Files.move(state.file.toPath(), failPath, StandardCopyOption.REPLACE_EXISTING);
+            result = failPath;
+        }
+
+        final Path csvPath = result.resolveSibling(
             PersistedHistogram.fileName(status, prefix, HISTORY_FILE_EXTENSION));
 
         try (PrintStream csvOutput = new PrintStream(csvPath.toFile(), StandardCharsets.US_ASCII);
-             HistogramLogReader reader = new HistogramLogReader(state.file))
+             HistogramLogReader reader = new HistogramLogReader(result.toFile()))
         {
             csvOutput.print("timestamp (ms)");
             for (final double percentile : CSV_PERCENTILES)
@@ -137,7 +151,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             }
         }
 
-        return PersistedHistogram.saveHistogramToFile(finalAggregate, outputDirectory, prefix, status);
+        return result;
     }
 
     public ValueRecorder valueRecorder()
@@ -147,7 +161,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
     public void reset()
     {
-        state.syncReset();
+        BackgroundLogger.INSTANCE.syncReset(state);
     }
 
     /**
@@ -155,21 +169,17 @@ public class LoggingPersistedHistogram implements PersistedHistogram
      */
     public void close()
     {
-        BackgroundLogger.INSTANCE.abandon(state);
+        BackgroundLogger.INSTANCE.syncDeregister(state);
     }
 
     // -------------------------------------------------------------------------
-    // Per-histogram state — owned by the histogram, visited by the shared thread
+    // Per-histogram state — pure data container
     // -------------------------------------------------------------------------
 
     static final class HistogramState
     {
-        private static final long TIMEOUT_MS = TimeUnit.SECONDS.toMillis(10);
-
         final File file;
         final SingleWriterRecorder recorder;
-        final OneToOneConcurrentArrayQueue<Request> requests = new OneToOneConcurrentArrayQueue<>(16);
-        final EpochClock epochClock = SystemEpochClock.INSTANCE;
 
         volatile boolean deregistered = false;
 
@@ -190,11 +200,12 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         {
             try
             {
+                final long nowMs = EPOCH_CLOCK.time();
                 this.logStream = new PrintStream(new FileOutputStream(file), false, StandardCharsets.US_ASCII);
                 this.writer = new HistogramLogWriter(logStream);
                 this.writer.outputLogFormatVersion();
-                this.writer.outputStartTime(epochClock.time());
-                this.lastLogTimeMs = epochClock.time();
+                this.writer.outputStartTime(nowMs);
+                this.lastLogTimeMs = nowMs;
             }
             catch (final IOException ex)
             {
@@ -216,15 +227,6 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             }
         }
 
-        void reset()
-        {
-            recorder.reset();
-            aggregate.reset();
-            recycled = null;
-            closeWriter();
-            openWriter();
-        }
-
         void flush()
         {
             recycled = recorder.getIntervalHistogram(recycled);
@@ -238,7 +240,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
         void poll()
         {
-            final long nowMs = epochClock.time();
+            final long nowMs = EPOCH_CLOCK.time();
             if (nowMs < lastLogTimeMs + BackgroundLogger.LOGGING_INTERVAL_MS)
             {
                 return;
@@ -254,18 +256,13 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             }
         }
 
-        Histogram syncAggregate()
+        void reset()
         {
-            final Request request = new Request(Request.Type.AGGREGATE);
-            requests.offer(request);
-            return (Histogram)request.await(TIMEOUT_MS);
-        }
-
-        void syncReset()
-        {
-            final Request request = new Request(Request.Type.RESET);
-            requests.offer(request);
-            request.await(TIMEOUT_MS);
+            recorder.reset();
+            aggregate.reset();
+            recycled = null;
+            closeWriter();
+            openWriter();
         }
     }
 
@@ -276,16 +273,18 @@ public class LoggingPersistedHistogram implements PersistedHistogram
     static final class Request
     {
         enum Type
-        { RESET, AGGREGATE }
+        { REGISTER, RESET, AGGREGATE, DEREGISTER }
 
         final Type type;
+        final HistogramState state;
         private final Object sync = new Object();
         private Object result;
         private boolean completed;
 
-        Request(final Type type)
+        Request(final Type type, final HistogramState state)
         {
             this.type = type;
+            this.state = state;
         }
 
         void complete(final Object value)
@@ -336,7 +335,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         static final long POLL_INTERVAL_MS = 100;
         static final long LOGGING_INTERVAL_MS = 1_000;
 
-        private final Set<HistogramState> states = new CopyOnWriteArraySet<>();
+        private final List<HistogramState> states = new ArrayList<>();
+        private final ManyToOneConcurrentArrayQueue<Request> requests = new ManyToOneConcurrentArrayQueue<>(64);
 
         private BackgroundLogger()
         {
@@ -345,53 +345,47 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             thread.start();
         }
 
-        void register(final HistogramState state)
+        void syncRegister(final HistogramState state)
         {
-            state.openWriter();
-            states.add(state);
+            final Request request = new Request(Request.Type.REGISTER, state);
+            requests.offer(request);
+            request.await(TIMEOUT_MS);
         }
 
-        /**
-         * Deregisters the state, flushes the final interval, closes the writer, and returns the aggregate histogram.
-         * Idempotent — safe to call even if already deregistered via {@link #abandon}.
-         */
-        Histogram deregister(final HistogramState state)
-        {
-            if (state.deregistered)
-            {
-                return state.aggregate.copy();
-            }
-            state.deregistered = true;
-            states.remove(state);
-            state.flush();
-            final Histogram aggregate = state.aggregate.copy();
-            state.closeWriter();
-            return aggregate;
-        }
-
-        /**
-         * Deregisters the state and releases resources without writing anything.
-         * Idempotent — safe to call after {@link #deregister}.
-         */
-        void abandon(final HistogramState state)
+        void syncDeregister(final HistogramState state)
         {
             if (state.deregistered)
             {
                 return;
             }
-            state.deregistered = true;
-            states.remove(state);
-            state.closeWriter();
+            final Request request = new Request(Request.Type.DEREGISTER, state);
+            requests.offer(request);
+            request.await(TIMEOUT_MS);
+        }
+
+        void syncReset(final HistogramState state)
+        {
+            final Request request = new Request(Request.Type.RESET, state);
+            requests.offer(request);
+            request.await(TIMEOUT_MS);
+        }
+
+        Histogram syncAggregate(final HistogramState state)
+        {
+            final Request request = new Request(Request.Type.AGGREGATE, state);
+            requests.offer(request);
+            return (Histogram)request.await(TIMEOUT_MS);
         }
 
         private void run()
         {
             while (true)
             {
-                for (final HistogramState state : states)
+                processRequests();
+
+                for (int i = 0; i < states.size(); i++)
                 {
-                    processRequests(state);
-                    state.poll();
+                    states.get(i).poll();
                 }
 
                 try
@@ -406,20 +400,32 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             }
         }
 
-        private void processRequests(final HistogramState state)
+        private void processRequests()
         {
             Request request;
-            while ((request = state.requests.poll()) != null)
+            while ((request = requests.poll()) != null)
             {
                 switch (request.type)
                 {
+                    case REGISTER:
+                        request.state.openWriter();
+                        states.add(request.state);
+                        request.complete(null);
+                        break;
                     case RESET:
-                        state.reset();
+                        request.state.reset();
                         request.complete(null);
                         break;
                     case AGGREGATE:
-                        state.flush();
-                        request.complete(state.aggregate.copy());
+                        request.state.flush();
+                        request.complete(request.state.aggregate.copy());
+                        break;
+                    case DEREGISTER:
+                        request.state.deregistered = true;
+                        states.remove(request.state);
+                        request.state.flush();
+                        request.state.closeWriter();
+                        request.complete(null);
                         break;
                 }
             }

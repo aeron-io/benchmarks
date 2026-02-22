@@ -202,6 +202,7 @@ public final class LoadTestRig
 
             final PersistedHistogram.Status status = result.status(expectedTotalRequests, expectedTotalResponses);
 
+            histogramSet.saveAll(configuration.outputDirectory(), status);
         }
         finally
         {
