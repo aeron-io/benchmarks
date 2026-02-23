@@ -98,19 +98,16 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         @Override
         public void recordValue(long value) throws ArrayIndexOutOfBoundsException
         {
-            throw new RuntimeException();
         }
 
         @Override
         public void recordValueWithCount(long value, long count) throws ArrayIndexOutOfBoundsException
         {
-            throw new RuntimeException();
         }
 
         @Override
         public void recordValueWithExpectedInterval(long value, long expectedIntervalBetweenValueSamples) throws ArrayIndexOutOfBoundsException
         {
-            throw new RuntimeException();
         }
 
         @Override

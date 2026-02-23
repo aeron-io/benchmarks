@@ -37,7 +37,7 @@ public interface PersistedHistogram extends AutoCloseable
     /**
      * File extension used to persist history of the histogram values on disc.
      */
-    String HISTORY_FILE_EXTENSION = ".hgrm.csv";
+    String HISTORY_FILE_EXTENSION = ".hdr.csv";
 
     /**
      * File suffix for aggregated histogram.
