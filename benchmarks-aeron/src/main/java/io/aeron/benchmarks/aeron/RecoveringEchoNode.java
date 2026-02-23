@@ -86,6 +86,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     static final String REPLAY_CHANNEL_PROP                   = "recovering.echo.replay.channel";
     static final String REPLAY_DESTINATION_PROP               = "recovering.echo.replay.destination";
     static final String RECORDING_ID_PROP                     = "recovering.echo.recording.id";
+    static final String PROCESSING_TIME_NS_PROP               = "recovering.echo.processing.time.ns";
 
     private static final long LOG_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1);
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter
@@ -111,6 +112,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     private final long pauseEveryNs;
     private final boolean stallingEnabled;
     private final RecoveryMode recoveryMode;
+    private final long processingTimeNs;
 
     // REPLAY_MERGE archive resources
     private final AeronArchive aeronArchive;
@@ -188,15 +190,17 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         this.aeron           = aeron;
         this.ownsAeronClient = ownsAeronClient;
 
-        this.pauseNs         = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_MS_PROP, 0));
-        this.pauseEveryNs    = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_EVERY_MS_PROP, 0));
-        this.stallingEnabled = pauseNs > 0 && pauseEveryNs > 0;
-        this.recoveryMode    = RecoveryMode.valueOf(
+        this.pauseNs          = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_MS_PROP, 0));
+        this.pauseEveryNs     = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_EVERY_MS_PROP, 0));
+        this.stallingEnabled  = pauseNs > 0 && pauseEveryNs > 0;
+        this.recoveryMode     = RecoveryMode.valueOf(
             System.getProperty(RECOVERY_MODE_PROP, RecoveryMode.GAP.name()));
+        this.processingTimeNs = Long.getLong(PROCESSING_TIME_NS_PROP, 0);
 
-        System.out.println("pauseMs: "      + Long.getLong(PAUSE_MS_PROP, 0));
-        System.out.println("pauseEveryMs: " + Long.getLong(PAUSE_EVERY_MS_PROP, 0));
-        System.out.println("recoveryMode: " + recoveryMode);
+        System.out.println("pauseMs: "          + Long.getLong(PAUSE_MS_PROP, 0));
+        System.out.println("pauseEveryMs: "     + Long.getLong(PAUSE_EVERY_MS_PROP, 0));
+        System.out.println("recoveryMode: "     + recoveryMode);
+        System.out.println("processingTimeNs: " + processingTimeNs);
         System.out.println("EchoNode.init(receiverIndex=" + receiverIndex + ")");
         System.out.println("  publication (source):       channel=" +
             sourceChannel() + " stream=" + sourceStreamId());
@@ -255,6 +259,15 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             }
             bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
             responsesSend++;
+
+            if (processingTimeNs > 0)
+            {
+                final long spinStartNs = System.nanoTime();
+                while (System.nanoTime() - spinStartNs < processingTimeNs)
+                {
+                    Thread.onSpinWait();
+                }
+            }
         };
     }
 
@@ -779,7 +792,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                 new ShutdownSignalBarrier(() -> running.set(false));
             RecoveringEchoNode node = new RecoveringEchoNode(running))
         {
-            Thread.currentThread().setName("echo-" + receiverIndex);
+            Thread.currentThread().setName("echo");
 
             try
             {
