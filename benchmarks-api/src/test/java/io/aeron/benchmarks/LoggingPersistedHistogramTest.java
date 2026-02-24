@@ -37,7 +37,8 @@ class LoggingPersistedHistogramTest
     @Test
     void shouldRecordHistory(final @TempDir Path tempDir) throws IOException, InterruptedException
     {
-        try (PersistedHistogram histogram = new LoggingPersistedHistogram(tempDir, new SingleWriterRecorder(3)))
+        final SingleWriterRecorder recorder = new SingleWriterRecorder(3);
+        try (PersistedHistogram histogram = new LoggingPersistedHistogram(tempDir, "loadtestrig", recorder))
         {
             Files.createFile(tempDir.resolve("another_one" + AGGREGATE_FILE_SUFFIX));
 
@@ -58,12 +59,12 @@ class LoggingPersistedHistogramTest
                 }
             }
 
-            histogram.saveToFile(tempDir, "results", OK);
+            histogram.saveToFile(tempDir, "loadtestrig", OK);
         }
 
         long totalCount = 0;
         int histogramCount = 0;
-        try (HistogramLogReader reader = new HistogramLogReader(tempDir + "/loadtestrig.hgrm"))
+        try (HistogramLogReader reader = new HistogramLogReader(tempDir + "/loadtestrig.hdr"))
         {
             while (reader.hasNext())
             {

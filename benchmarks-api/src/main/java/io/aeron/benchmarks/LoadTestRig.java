@@ -25,6 +25,7 @@ import org.agrona.concurrent.SystemNanoClock;
 
 import java.io.PrintStream;
 import java.lang.invoke.VarHandle;
+import java.lang.reflect.Constructor;
 import java.util.Properties;
 import java.util.function.BiFunction;
 
@@ -37,7 +38,6 @@ import static org.agrona.PropertyAction.REPLACE;
 import static io.aeron.benchmarks.MessageTransceiver.CHECKSUM;
 import static io.aeron.benchmarks.PersistedHistogram.Status.FAIL;
 import static io.aeron.benchmarks.PersistedHistogram.Status.OK;
-import static io.aeron.benchmarks.PersistedHistogram.newPersistedHistogram;
 import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 
@@ -53,12 +53,17 @@ public final class LoadTestRig
     private final MessageTransceiver messageTransceiver;
     private final PrintStream out;
     private final NanoClock clock;
-    private final PersistedHistogram persistedHistogram;
+    private final PersistedHistogramSet histogramSet;
     private final ProgressReporter progressReporter;
 
     public LoadTestRig(final Configuration configuration)
     {
-        this(configuration, SystemNanoClock.INSTANCE, newPersistedHistogram(configuration), System.out);
+        this.configuration = requireNonNull(configuration);
+        this.out = System.out;
+        this.clock = SystemNanoClock.INSTANCE;
+        this.histogramSet = new PersistedHistogramSet(configuration);
+        this.messageTransceiver = createTransceiver(configuration, this.clock, this.histogramSet, null);
+        this.progressReporter = buildProgressReporter(configuration, this.out);
     }
 
     public LoadTestRig(
@@ -67,12 +72,12 @@ public final class LoadTestRig
         final PersistedHistogram persistedHistogram,
         final PrintStream out)
     {
-        this(
-            configuration,
-            nanoClock,
-            persistedHistogram,
-            (nc, ph) -> createTransceiver(configuration, nc, ph),
-            out);
+        this.configuration = requireNonNull(configuration);
+        this.out = requireNonNull(out);
+        this.clock = requireNonNull(nanoClock);
+        this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
+        this.messageTransceiver = createTransceiver(configuration, nanoClock, this.histogramSet, persistedHistogram);
+        this.progressReporter = buildProgressReporter(configuration, out);
     }
 
     public LoadTestRig(
@@ -82,15 +87,13 @@ public final class LoadTestRig
         final BiFunction<NanoClock, ValueRecorder, MessageTransceiver> transceiverFactory,
         final PrintStream out)
     {
-        this(
-            configuration,
-            transceiverFactory.apply(nanoClock, persistedHistogram.valueRecorder()),
-            out,
-            nanoClock,
-            persistedHistogram,
-            configuration.reportProgress() ?
-            new AsyncProgressReporter(out, new OneToOneConcurrentArrayQueue<>(16)) :
-            ProgressReporter.NULL_PROGRESS_REPORTER);
+        this.configuration = requireNonNull(configuration);
+        this.out = requireNonNull(out);
+        this.clock = requireNonNull(nanoClock);
+        this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
+        this.messageTransceiver = requireNonNull(transceiverFactory)
+            .apply(nanoClock, persistedHistogram.valueRecorder());
+        this.progressReporter = buildProgressReporter(configuration, out);
     }
 
     LoadTestRig(
@@ -102,11 +105,13 @@ public final class LoadTestRig
         final ProgressReporter progressReporter)
     {
         this.configuration = requireNonNull(configuration);
-        this.messageTransceiver = requireNonNull(messageTransceiver);
         this.out = requireNonNull(out);
         this.clock = requireNonNull(clock);
-        this.persistedHistogram = requireNonNull(persistedHistogram);
-        this.progressReporter = progressReporter;
+        this.histogramSet = persistedHistogram != null ?
+            PersistedHistogramSet.wrap(configuration, persistedHistogram) :
+            new PersistedHistogramSet(configuration);
+        this.messageTransceiver = requireNonNull(messageTransceiver);
+        this.progressReporter = requireNonNull(progressReporter);
     }
 
     /**
@@ -143,7 +148,7 @@ public final class LoadTestRig
                 send(configuration.warmupIterations(), configuration.warmupMessageRate());
 
                 messageTransceiver.reset();
-                persistedHistogram.reset();
+                histogramSet.reset();
                 progressReporter.reset();
             }
 
@@ -157,22 +162,18 @@ public final class LoadTestRig
             progressReporter.reset();
 
             out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
-            final PersistedHistogram histogram = persistedHistogram;
-            histogram.outputPercentileDistribution(out, Configuration.outputScaleRatio(configuration.outputTimeUnit()));
+            histogramSet.outputPercentileDistributions(out);
 
             final long expectedTotalNumberOfMessages = configuration.iterations() * (long)configuration.messageRate();
             warnIfTargetRateNotAchieved(result, expectedTotalNumberOfMessages);
 
             final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);
-            histogram.saveToFile(
-                configuration.outputDirectory(),
-                configuration.outputFileNamePrefix(),
-                status);
+            histogramSet.saveAll(status);
         }
         finally
         {
             messageTransceiver.destroy();
-            CloseHelper.close(persistedHistogram);
+            CloseHelper.close(histogramSet);
         }
     }
 
@@ -311,23 +312,70 @@ public final class LoadTestRig
         }
     }
 
+    private static ProgressReporter buildProgressReporter(
+        final Configuration configuration,
+        final PrintStream out)
+    {
+        if (configuration.reportProgress())
+        {
+            return new AsyncProgressReporter(out, new OneToOneConcurrentArrayQueue<>(16));
+        }
+        else
+        {
+            return ProgressReporter.NULL_PROGRESS_REPORTER;
+        }
+    }
+
     private static MessageTransceiver createTransceiver(
         final Configuration configuration,
         final NanoClock nanoClock,
-        final ValueRecorder valueRecorder)
+        final PersistedHistogramSet histogramSet,
+        final PersistedHistogram persistedHistogram)
     {
+        final Class<? extends MessageTransceiver> clazz = configuration.messageTransceiverClass();
+
         try
         {
-            return configuration
-                .messageTransceiverClass()
-                .getConstructor(NanoClock.class, ValueRecorder.class)
-                .newInstance(nanoClock, valueRecorder);
+            for (final Constructor<?> constructor : clazz.getConstructors())
+            {
+                final Class<?>[] params = constructor.getParameterTypes();
+                if (params.length != 2 || params[0] != NanoClock.class)
+                {
+                    continue;
+                }
+
+                if (params[1] == PersistedHistogramSet.class)
+                {
+                    return clazz.cast(constructor.newInstance(nanoClock, histogramSet));
+                }
+
+                if (params[1] == ValueRecorder.class)
+                {
+                    final ValueRecorder recorder = resolveValueRecorder(
+                        persistedHistogram, histogramSet, configuration);
+                    return clazz.cast(constructor.newInstance(nanoClock, recorder));
+                }
+            }
+
+            throw new IllegalStateException(
+                "No suitable constructor found on " + clazz.getName() +
+                ": expected (NanoClock, PersistedHistogramSet) or (NanoClock, ValueRecorder)");
         }
         catch (final ReflectiveOperationException ex)
         {
             LangUtil.rethrowUnchecked(ex);
             throw new Error();
         }
+    }
+
+    private static ValueRecorder resolveValueRecorder(
+        final PersistedHistogram persistedHistogram,
+        final PersistedHistogramSet histogramSet,
+        final Configuration configuration)
+    {
+        return persistedHistogram != null ?
+            persistedHistogram.valueRecorder() :
+            histogramSet.create(configuration.outputFileNamePrefix()).valueRecorder();
     }
 
     public static void main(final String[] args) throws Exception

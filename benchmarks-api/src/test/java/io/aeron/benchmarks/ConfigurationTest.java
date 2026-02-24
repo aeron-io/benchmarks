@@ -242,7 +242,8 @@ class ConfigurationTest
         final IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, builder::build);
 
         assertEquals(
-            "MessageTransceiver class must have a public constructor that takes a NanoClock and a ValueRecorder",
+            "MessageTransceiver class must have a public constructor that takes a NanoClock and a ValueRecorder " +
+            "or a NanoClock and a PersistedHistogramSet",
             ex.getMessage());
     }
 
