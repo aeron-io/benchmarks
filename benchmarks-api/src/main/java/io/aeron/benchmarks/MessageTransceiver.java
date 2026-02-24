@@ -19,7 +19,6 @@ import org.HdrHistogram.ValueRecorder;
 import org.agrona.concurrent.NanoClock;
 
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 import static java.util.Objects.requireNonNull;
 
@@ -37,11 +36,9 @@ abstract class MessageTransceiverLhsPadding
 
 abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 {
-    static final AtomicLongFieldUpdater<MessageTransceiverHotFields> RECEIVED_MESSAGES_UPDATER =
-        AtomicLongFieldUpdater.newUpdater(MessageTransceiverHotFields.class, "receivedMessages");
     final NanoClock clock;
     final ValueRecorder valueRecorder;
-    private volatile long receivedMessages;
+    long receivedMessages;
 
     MessageTransceiverHotFields(final NanoClock clock, final ValueRecorder valueRecorder)
     {
@@ -51,7 +48,7 @@ abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 
     final long receivedMessages()
     {
-        return RECEIVED_MESSAGES_UPDATER.get(this);
+        return receivedMessages;
     }
 }
 
@@ -150,12 +147,12 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
         }
 
         valueRecorder.recordValue(clock.nanoTime() - timestamp);
-        RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
+        receivedMessages++;
     }
 
     final void reset()
     {
         valueRecorder.reset();
-        RECEIVED_MESSAGES_UPDATER.set(this, 0);
+        receivedMessages = 0;
     }
 }
