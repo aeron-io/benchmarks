@@ -150,6 +150,29 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
         receivedMessages++;
     }
 
+    /**
+     * Callback method to be invoked for every message received.
+     * <p>
+     * Normally you want to use the {@link #onMessageReceived(long, long)} and rely on the ValueRecorder
+     * inside the MessageTransceiver. But when there are multiple ValueRecorder instances, then this method
+     * should be used.
+     *
+     * @param valueRecorder the ValueRecorder used to record the value
+     * @param timestamp from the received message.
+     * @param checksum  from the received message.
+     */
+    protected final void onMessageReceived(
+        final ValueRecorder valueRecorder, final long timestamp, final long checksum)
+    {
+        if (CHECKSUM != checksum)
+        {
+            throw new IllegalStateException("Invalid checksum: expected=" + CHECKSUM + ", actual=" + checksum);
+        }
+
+        valueRecorder.recordValue(clock.nanoTime() - timestamp);
+        receivedMessages++;
+    }
+
     final void reset()
     {
         valueRecorder.reset();

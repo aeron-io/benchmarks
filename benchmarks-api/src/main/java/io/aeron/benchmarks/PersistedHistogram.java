@@ -37,7 +37,7 @@ public interface PersistedHistogram extends AutoCloseable
     /**
      * File extension used to persist history of the histogram values on disc.
      */
-    String HISTORY_FILE_EXTENSION = ".hgrm.csv";
+    String HISTORY_FILE_EXTENSION = ".hdr.csv";
 
     /**
      * File suffix for aggregated histogram.
@@ -154,15 +154,17 @@ public interface PersistedHistogram extends AutoCloseable
     @SuppressWarnings("checkstyle:indentation")
     static PersistedHistogram newPersistedHistogram(final Configuration configuration)
     {
-        try
+        final int numberOfSignificantValueDigits = 3;
+        if (configuration.trackHistory())
         {
-            return configuration.trackHistory() ?
-                new LoggingPersistedHistogram(configuration.outputDirectory(), new SingleWriterRecorder(3)) :
-                new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), 3));
+            return new LoggingPersistedHistogram(
+                configuration.outputDirectory(),
+                configuration.outputFileNamePrefix(),
+                new SingleWriterRecorder(numberOfSignificantValueDigits));
         }
-        catch (final IOException ex)
+        else
         {
-            throw new RuntimeException(ex);
+            return new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), numberOfSignificantValueDigits));
         }
     }
 }

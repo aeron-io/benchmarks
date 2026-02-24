@@ -25,8 +25,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Random;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -213,20 +211,31 @@ class PersistedHistogramTest
         assertEquals(expectedHistogram, savedHistogram);
     }
 
+
     static Histogram readHistogram(final Path file) throws FileNotFoundException
     {
-        final List<EncodableHistogram> histograms = new ArrayList<>();
+        // THis method reads the aggregated histogram from the file.
+        // For a SinglePersistedHistogram, there will be just one entry in the file
+        // But for the LoggingPersistedHistogram, there could be multiple entries
+        // in the file.
+
+        Histogram aggregate = null;
         try (HistogramLogReader logReader = new HistogramLogReader(file.toFile()))
         {
             while (logReader.hasNext())
             {
-                histograms.add(logReader.nextIntervalHistogram());
+                final Histogram histogram = (Histogram)logReader.nextIntervalHistogram();
+                if (aggregate == null)
+                {
+                    aggregate = new Histogram(histogram.getNumberOfSignificantValueDigits());
+                }
+                aggregate.add(histogram);
             }
         }
 
-        assertEquals(1, histograms.size());
+        assertNotNull(aggregate);
 
-        return (Histogram)histograms.get(0);
+        return aggregate;
     }
 
     private static Stream<Arguments> histograms()
@@ -251,14 +260,7 @@ class PersistedHistogramTest
     {
         public PersistedHistogram apply(final Path path)
         {
-            try
-            {
-                return new LoggingPersistedHistogram(path, new SingleWriterRecorder(3));
-            }
-            catch (final IOException ex)
-            {
-                throw new RuntimeException(ex);
-            }
+            return new LoggingPersistedHistogram(path, "test", new SingleWriterRecorder(3));
         }
 
         public String toString()
