@@ -24,7 +24,6 @@ import io.aeron.archive.codecs.SourceLocation;
 import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
-import org.HdrHistogram.Histogram;
 import org.HdrHistogram.ValueRecorder;
 import org.agrona.collections.MutableInteger;
 import org.agrona.concurrent.NanoClock;
@@ -71,7 +70,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
     private ExclusivePublication publication;
     private Subscription[] subscriptions;
     private FragmentHandler[] fragmentHandlers;
-    private int numReceivers;
+    private int receiverCount;
     private AeronArchive aeronArchive;
     private long recordingSubscriptionId = -1;
 
@@ -134,12 +133,12 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         final int[] srcStreams = sourceStreams();
         assertChannelsAndStreamsMatch(srcChannels, srcStreams, SOURCE_CHANNELS_PROP_NAME, SOURCE_STREAMS_PROP_NAME);
 
-        numReceivers = srcChannels.length;
-        subscriptions = new Subscription[numReceivers];
-        fragmentHandlers = new FragmentHandler[numReceivers];
-        System.out.println("  numReceivers: " + numReceivers);
+        receiverCount = srcChannels.length;
+        subscriptions = new Subscription[receiverCount];
+        fragmentHandlers = new FragmentHandler[receiverCount];
+        System.out.println("  numReceivers: " + receiverCount);
 
-        for (int i = 0; i < numReceivers; i++)
+        for (int i = 0; i < receiverCount; i++)
         {
             System.out.println("  creating subscription[" + i + "]: channel=" +
                 srcChannels[i] + " stream=" + srcStreams[i]);
@@ -176,7 +175,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
 
         startArchiveRecording();
 
-        for (int i = 0; i < numReceivers; i++)
+        for (int i = 0; i < receiverCount; i++)
         {
             System.out.println("  awaiting subscription[" + i + "] " +
                 "(remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms): channel=" + subscriptions[i].channel() +
@@ -256,19 +255,14 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
         return sendMessages(
-            publication, bufferClaim, numberOfMessages, messageLength, timestamp, checksum, receiverIndex, 1);
+            publication, bufferClaim, numberOfMessages, messageLength, timestamp, checksum, receiverIndex, receiverCount);
     }
 
     public void receive()
     {
-        for (int i = 0; i < numReceivers; i++)
+        for (int i = 0; i < receiverCount; i++)
         {
             subscriptions[i].poll(fragmentHandlers[i], FRAGMENT_LIMIT);
         }
-    }
-
-    public long expectedResponseMessages(final long iterations, final long messageRate)
-    {
-        return iterations * messageRate * numReceivers;
     }
 }

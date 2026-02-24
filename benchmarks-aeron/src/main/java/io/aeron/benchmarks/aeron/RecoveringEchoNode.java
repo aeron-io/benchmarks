@@ -42,6 +42,7 @@ import static io.aeron.Aeron.connect;
 import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 import static io.aeron.benchmarks.aeron.AeronUtil.FRAGMENT_LIMIT;
+import static io.aeron.benchmarks.aeron.AeronUtil.RECEIVER_INDEX_OFFSET;
 import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
@@ -52,6 +53,7 @@ import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfCon
 import static io.aeron.benchmarks.aeron.AeronUtil.receiverIndex;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
+import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.CloseHelper.closeAll;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
@@ -201,7 +203,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         System.out.println("pauseEveryMs: "     + Long.getLong(PAUSE_EVERY_MS_PROP, 0));
         System.out.println("recoveryMode: "     + recoveryMode);
         System.out.println("processingTimeNs: " + processingTimeNs);
-        System.out.println("EchoNode.init(receiverIndex=" + receiverIndex + ")");
+        System.out.printf( "%s.init(receiverIndex=%s)%n", RecoveringEchoNode.class.getSimpleName(), receiverIndex );
         System.out.println("  publication (source):       channel=" +
             sourceChannel() + " stream=" + sourceStreamId());
         System.out.println("  subscription (destination): channel=" +
@@ -245,27 +247,30 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
         fragmentHandler = (buffer, offset, length, header) ->
         {
-            requestReceived++;
-            if (lastDiagNs == 0)
+            if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
-                firstMessageNs      = System.nanoTime();
-                lastDiagNs          = firstMessageNs;
-                lastDiagTotalEchoed = 0;
-            }
-            long result;
-            while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
-            {
-                checkPublicationResult(result);
-            }
-            bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
-            responsesSend++;
-
-            if (processingTimeNs > 0)
-            {
-                final long spinStartNs = System.nanoTime();
-                while (System.nanoTime() - spinStartNs < processingTimeNs)
+                requestReceived++;
+                if (lastDiagNs == 0)
                 {
-                    Thread.onSpinWait();
+                    firstMessageNs = System.nanoTime();
+                    lastDiagNs = firstMessageNs;
+                    lastDiagTotalEchoed = 0;
+                }
+                long result;
+                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                {
+                    checkPublicationResult(result);
+                }
+                bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
+                responsesSend++;
+
+                if (processingTimeNs > 0)
+                {
+                    final long spinStartNs = System.nanoTime();
+                    while (System.nanoTime() - spinStartNs < processingTimeNs)
+                    {
+                        Thread.onSpinWait();
+                    }
                 }
             }
         };
