@@ -129,7 +129,7 @@ public final class AeronUtil
     public static final String FAILOVER_DELAY_PROP_NAME =
         "io.aeron.benchmarks.aeron.cluster.failover.delay";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
-    private static final int SEND_ATTEMPTS = 3;
+    static final int SEND_ATTEMPTS = 3;
 
     private AeronUtil()
     {

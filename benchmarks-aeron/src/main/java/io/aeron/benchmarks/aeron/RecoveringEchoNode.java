@@ -54,13 +54,30 @@ import static io.aeron.benchmarks.aeron.AeronUtil.receiverIndex;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
+import static org.agrona.BitUtil.SIZE_OF_INT;
+import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
 
 /**
- * Remote node which echoes original messages back to the sender, with a configurable periodic stall.
- * Implemented as a flat state machine: LIVE, STALLING, RECOVERING.
+ * Remote node which echoes original messages back to the sender.
+ * <p>
+ * Every message carries a processing time field (nanoseconds). After echoing,
+ * the node spins for the specified duration. A large processing time causes the
+ * node to fall behind, the term buffer to fill, and the image to close —
+ * triggering the recovery path. This replaces the earlier explicit stall/control
+ * message mechanism.
+ * <p>
+ * Wire layout:
+ * <pre>
+ *   [TIMESTAMP_OFFSET..+7]           timestamp (long, little-endian)
+ *   [RECEIVER_INDEX_OFFSET..+3]      receiver index (int, little-endian)
+ *   [PROCESSING_TIME_OFFSET..+7]     processing time (long, nanoseconds, little-endian)
+ *   [messageLength-8..end]           checksum (long, little-endian)
+ * </pre>
+ * <p>
+ * Implemented as a flat state machine: LIVE, RECOVERING.
  * Runs until the JVM exits via shutdown signal.
  *
  * Recovery modes:
@@ -79,8 +96,6 @@ import static org.agrona.PropertyAction.REPLACE;
  */
 public final class RecoveringEchoNode implements AutoCloseable, Runnable
 {
-    static final String PAUSE_MS_PROP                         = "recovering.echo.pause.ms";
-    static final String PAUSE_EVERY_MS_PROP                   = "recovering.echo.pause.every.ms";
     static final String RECOVERY_MODE_PROP                    = "recovering.echo.recovery.mode";
     static final String ARCHIVE_CONTROL_CHANNEL_PROP          = "recovering.echo.archive.control.channel";
     static final String ARCHIVE_CONTROL_STREAM_PROP           = "recovering.echo.archive.control.stream";
@@ -88,7 +103,12 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     static final String REPLAY_CHANNEL_PROP                   = "recovering.echo.replay.channel";
     static final String REPLAY_DESTINATION_PROP               = "recovering.echo.replay.destination";
     static final String RECORDING_ID_PROP                     = "recovering.echo.recording.id";
-    static final String PROCESSING_TIME_NS_PROP               = "recovering.echo.processing.time.ns";
+
+    /**
+     * Offset of the processing time field (long, nanoseconds) within a message.
+     * Immediately follows the receiver index int field.
+     */
+    static final int PROCESSING_TIME_OFFSET = RECEIVER_INDEX_OFFSET + SIZE_OF_INT;
 
     private static final long LOG_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1);
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter
@@ -97,7 +117,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     enum RecoveryMode { GAP, REPLAY_MERGE, REPLAY_MERGE_V2 }
 
-    enum State { LIVE, STALLING, RECOVERING }
+    enum State { LIVE, RECOVERING }
 
     // -------------------------------------------------------------------------
     // Fixed node fields
@@ -110,11 +130,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     private final MediaDriver mediaDriver;
     private final Aeron aeron;
     private final boolean ownsAeronClient;
-    private final long pauseNs;
-    private final long pauseEveryNs;
-    private final boolean stallingEnabled;
     private final RecoveryMode recoveryMode;
-    private final long processingTimeNs;
 
     // REPLAY_MERGE archive resources
     private final AeronArchive aeronArchive;
@@ -128,10 +144,8 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     private State state = State.LIVE;
 
-    // Current image being polled in LIVE/STALLING states.
+    // Current image being polled in LIVE state.
     private Image image;
-    private long nextStallDeadlineNs = Long.MAX_VALUE;
-    private long stallDeadlineNs     = 0;
 
     // The subscription that owns `image`. Initially the multicast subscription; after each
     // recovery it is the promoted mergeSubscription. Closed when its image closes.
@@ -160,16 +174,14 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     private long currentLivePhaseMessages = 0;
     private long totalLiveMessages        = 0;
     private long totalArchiveMessages     = 0;
-    private long stallCount               = 0;
     private int  recoveryAttempts         = 0;
     private long requestReceived          = 0;
     private long responsesSend            = 0;
 
     // Diagnostics
-    private long    lastDiagTotalEchoed    = 0;
-    private long    lastDiagNs             = 0;
-    private long    firstMessageNs         = 0;
-    private boolean imageClosedDuringStall = false;
+    private long lastDiagTotalEchoed = 0;
+    private long lastDiagNs          = 0;
+    private long firstMessageNs      = 0;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -192,18 +204,11 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         this.aeron           = aeron;
         this.ownsAeronClient = ownsAeronClient;
 
-        this.pauseNs          = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_MS_PROP, 0));
-        this.pauseEveryNs     = TimeUnit.MILLISECONDS.toNanos(Long.getLong(PAUSE_EVERY_MS_PROP, 0));
-        this.stallingEnabled  = pauseNs > 0 && pauseEveryNs > 0;
-        this.recoveryMode     = RecoveryMode.valueOf(
+        this.recoveryMode = RecoveryMode.valueOf(
             System.getProperty(RECOVERY_MODE_PROP, RecoveryMode.GAP.name()));
-        this.processingTimeNs = Long.getLong(PROCESSING_TIME_NS_PROP, 0);
 
-        System.out.println("pauseMs: "          + Long.getLong(PAUSE_MS_PROP, 0));
-        System.out.println("pauseEveryMs: "     + Long.getLong(PAUSE_EVERY_MS_PROP, 0));
-        System.out.println("recoveryMode: "     + recoveryMode);
-        System.out.println("processingTimeNs: " + processingTimeNs);
-        System.out.printf( "%s.init(receiverIndex=%s)%n", RecoveringEchoNode.class.getSimpleName(), receiverIndex );
+        System.out.println("recoveryMode: " + recoveryMode);
+        System.out.printf("%s.init(receiverIndex=%s)%n", RecoveringEchoNode.class.getSimpleName(), receiverIndex);
         System.out.println("  publication (source):       channel=" +
             sourceChannel() + " stream=" + sourceStreamId());
         System.out.println("  subscription (destination): channel=" +
@@ -247,30 +252,34 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
         fragmentHandler = (buffer, offset, length, header) ->
         {
-            if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
+            if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) != receiverIndex)
             {
-                requestReceived++;
-                if (lastDiagNs == 0)
-                {
-                    firstMessageNs = System.nanoTime();
-                    lastDiagNs = firstMessageNs;
-                    lastDiagTotalEchoed = 0;
-                }
-                long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
-                {
-                    checkPublicationResult(result);
-                }
-                bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
-                responsesSend++;
+                return;
+            }
 
-                if (processingTimeNs > 0)
+            requestReceived++;
+            if (lastDiagNs == 0)
+            {
+                firstMessageNs      = System.nanoTime();
+                lastDiagNs          = firstMessageNs;
+                lastDiagTotalEchoed = 0;
+            }
+
+            long result;
+            while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+            {
+                checkPublicationResult(result);
+            }
+            bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
+            responsesSend++;
+
+            final long processingTimeNs = buffer.getLong(offset + PROCESSING_TIME_OFFSET, LITTLE_ENDIAN);
+            if (processingTimeNs > 0)
+            {
+                final long spinStartNs = System.nanoTime();
+                while (System.nanoTime() - spinStartNs < processingTimeNs)
                 {
-                    final long spinStartNs = System.nanoTime();
-                    while (System.nanoTime() - spinStartNs < processingTimeNs)
-                    {
-                        Thread.onSpinWait();
-                    }
+                    Thread.onSpinWait();
                 }
             }
         };
@@ -310,11 +319,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         log("Image acquired: sessionId=%d, position=%d, mtu=%d, correlationId=%d",
             image.sessionId(), image.position(), image.mtuLength(), image.correlationId());
 
-        if (stallingEnabled)
-        {
-            nextStallDeadlineNs = System.nanoTime() + pauseEveryNs;
-        }
-
         log("State machine starting in LIVE");
 
         long nextLogNs = System.nanoTime() + LOG_INTERVAL_NS;
@@ -332,10 +336,8 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             }
         }
 
-        log("Shutdown. totalEchoed=%,d, totalLive=%,d, totalArchive=%,d, " +
-                "stallCount=%,d, recoveryAttempts=%d",
-            totalMessagesEchoed, totalLiveMessages, totalArchiveMessages,
-            stallCount, recoveryAttempts);
+        log("Shutdown. totalEchoed=%,d, totalLive=%,d, totalArchive=%,d, recoveryAttempts=%d",
+            totalMessagesEchoed, totalLiveMessages, totalArchiveMessages, recoveryAttempts);
     }
 
     // -------------------------------------------------------------------------
@@ -347,7 +349,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         switch (state)
         {
             case LIVE:       return doLive();
-            case STALLING:   return doStall();
             case RECOVERING: return doRecovery();
             default:
                 throw new IllegalStateException("Unknown state: " + state);
@@ -360,16 +361,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     private int doLive()
     {
-        if (stallingEnabled && System.nanoTime() >= nextStallDeadlineNs)
-        {
-            stallCount++;
-            stallDeadlineNs = System.nanoTime() + pauseNs;
-            log("LIVE -> STALLING: stall #%,d, pausing %,d ms, totalEchoed=%,d, imagePosition=%d",
-                stallCount, pauseNs / 1_000_000, totalMessagesEchoed, image.position());
-            state = State.STALLING;
-            return 1;
-        }
-
         if (image.isClosed())
         {
             lostPosition = image.position();
@@ -378,8 +369,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             totalLiveMessages        += currentLivePhaseMessages;
             currentLivePhaseMessages  = 0;
 
-            // Image is gone — close the subscription that owned it.
-            // A fresh mergeSubscription will be created for the next ReplayMerge.
             closeAll(liveSubscription);
             liveSubscription = null;
 
@@ -395,32 +384,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         }
 
         return fragments;
-    }
-
-    // -------------------------------------------------------------------------
-    // STALLING
-    // -------------------------------------------------------------------------
-
-    private int doStall()
-    {
-        if (image.isClosed() && !imageClosedDuringStall)
-        {
-            imageClosedDuringStall = true;
-            log("Image CLOSED during STALLING #%,d: position=%d, totalEchoed=%,d",
-                stallCount, image.position(), totalMessagesEchoed);
-        }
-
-        if (System.nanoTime() >= stallDeadlineNs)
-        {
-            log("STALLING -> LIVE: stall #%,d complete, imageClosed=%b, imagePosition=%d",
-                stallCount, image.isClosed(), image.position());
-            nextStallDeadlineNs    = System.nanoTime() + pauseEveryNs;
-            imageClosedDuringStall = false;
-            state = State.LIVE;
-            return 1;
-        }
-
-        return 0;
     }
 
     // -------------------------------------------------------------------------
@@ -634,8 +597,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                 recoveryArchiveFragments, recoveryLiveFragments,
                 totalArchiveMessages, totalLiveMessages, totalMessagesEchoed);
 
-            // Close only the ReplayMerge wrapper — mergeSubscription stays open.
-            // Promote mergeSubscription to liveSubscription: it now carries the live image.
             replayMerge.close();
             replayMerge = null;
 
@@ -644,7 +605,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             mergeSubscription = null;
 
             currentLivePhaseMessages = 0;
-            nextStallDeadlineNs      = stallingEnabled ? System.nanoTime() + pauseEveryNs : Long.MAX_VALUE;
             state                    = State.LIVE;
             return 1;
         }
@@ -671,19 +631,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         switch (state)
         {
             case LIVE:
-                stateDetails = String.format(
-                    "imagePosition=%d, nextStallInMs=%,d",
-                    image.position(),
-                    stallingEnabled
-                        ? Math.max(0, (nextStallDeadlineNs - System.nanoTime()) / 1_000_000)
-                        : -1);
-                break;
-
-            case STALLING:
-                stateDetails = String.format(
-                    "imagePosition=%d, stallRemainingMs=%,d",
-                    image.position(),
-                    Math.max(0, (stallDeadlineNs - System.nanoTime()) / 1_000_000));
+                stateDetails = String.format("imagePosition=%d", image.position());
                 break;
 
             case RECOVERING:
@@ -741,8 +689,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         lastDiagNs                 = nowNs;
 
         log("[DIAG] state=%s, rate=%,d/s, totalRate=%,d/s, totalEchoed=%,d, requests=%,d, responses=%,d, " +
-                "totalLive=%,d, totalArchive=%,d, currentLivePhase=%,d, " +
-                "stallCount=%,d, recoveryAttempts=%d | %s",
+                "totalLive=%,d, totalArchive=%,d, currentLivePhase=%,d, recoveryAttempts=%d | %s",
             state,
             ratePerSec,
             totalRatePerSec,
@@ -752,7 +699,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             totalLiveMessages,
             totalArchiveMessages,
             currentLivePhaseMessages,
-            stallCount,
             recoveryAttempts,
             stateDetails);
     }
@@ -763,7 +709,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     public void close()
     {
-        log("StallingEchoNode: closing");
+        log("RecoveringEchoNode: closing");
         if (replayMerge != null)
         {
             replayMerge.close();
@@ -778,7 +724,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         {
             closeAll(aeron, mediaDriver);
         }
-        log("StallingEchoNode: closed");
+        log("RecoveringEchoNode: closed");
     }
 
     // -------------------------------------------------------------------------
