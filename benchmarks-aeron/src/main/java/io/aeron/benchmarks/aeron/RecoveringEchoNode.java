@@ -21,21 +21,20 @@ import io.aeron.Image;
 import io.aeron.Subscription;
 import io.aeron.ChannelUriStringBuilder;
 import io.aeron.archive.client.AeronArchive;
+import io.aeron.archive.client.PersistentSubscriptionListener;
+import io.aeron.archive.client.PersistentSubscription;
 import io.aeron.archive.client.ReplayMerge;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
 import io.aeron.logbuffer.BufferClaim;
+import io.aeron.logbuffer.ControlledFragmentHandler;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 import org.agrona.concurrent.SystemNanoClock;
 
 import java.nio.file.Path;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Properties;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.aeron.Aeron.connect;
@@ -43,7 +42,7 @@ import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 import static io.aeron.benchmarks.aeron.AeronUtil.FRAGMENT_LIMIT;
 import static io.aeron.benchmarks.aeron.AeronUtil.RECEIVER_INDEX_OFFSET;
-import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+
 import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
@@ -66,8 +65,7 @@ import static org.agrona.PropertyAction.REPLACE;
  * Every message carries a processing time field (nanoseconds). After echoing,
  * the node spins for the specified duration. A large processing time causes the
  * node to fall behind, the term buffer to fill, and the image to close —
- * triggering the recovery path. This replaces the earlier explicit stall/control
- * message mechanism.
+ * triggering the recovery path.
  * <p>
  * Wire layout:
  * <pre>
@@ -77,22 +75,10 @@ import static org.agrona.PropertyAction.REPLACE;
  *   [messageLength-8..end]           checksum (long, little-endian)
  * </pre>
  * <p>
- * Implemented as a flat state machine: LIVE, RECOVERING.
- * Runs until the JVM exits via shutdown signal.
- *
- * Recovery modes:
- *   GAP          - accept the gap, wait for a new image
- *   REPLAY_MERGE - replay from archive and merge back to live
- *   REPLAY_MERGE_V2 - not yet implemented
- *
- * Subscription lifecycle (REPLAY_MERGE mode):
- *   1. liveSubscription starts as the initial multicast subscription.
- *   2. When its image closes: liveSubscription is closed, state -> RECOVERING.
- *   3. A fresh mergeSubscription is created for ReplayMerge.
- *   4. When isMerged(): ReplayMerge wrapper is closed; mergeSubscription is promoted
- *      to liveSubscription (it now carries the live image). state -> LIVE.
- *   5. When that image closes: repeat from step 2.
- *   One subscription is active at any time; each subscription is closed when its image closes.
+ * Recovery strategy is selected at construction time via {@code recovering.echo.recovery.mode}:
+ *   GAP             - accept the gap, wait for a new image
+ *   REPLAY_MERGE    - replay from archive and merge back to live
+ *   PERSISTENT_SUBSCRIPTION - replay via PersistentSubscription
  */
 public final class RecoveringEchoNode implements AutoCloseable, Runnable
 {
@@ -110,17 +96,8 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
      */
     static final int PROCESSING_TIME_OFFSET = RECEIVER_INDEX_OFFSET + SIZE_OF_INT;
 
-    private static final long LOG_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1);
-    private static final DateTimeFormatter TS_FMT = DateTimeFormatter
-        .ofPattern("HH:mm:ss.SSS")
-        .withZone(ZoneId.systemDefault());
-
-    enum RecoveryMode { GAP, REPLAY_MERGE, REPLAY_MERGE_V2 }
-
-    enum State { LIVE, RECOVERING }
-
     // -------------------------------------------------------------------------
-    // Fixed node fields
+    // Node fields
     // -------------------------------------------------------------------------
 
     private final BufferClaim bufferClaim = new BufferClaim();
@@ -130,58 +107,14 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
     private final MediaDriver mediaDriver;
     private final Aeron aeron;
     private final boolean ownsAeronClient;
-    private final RecoveryMode recoveryMode;
-
-    // REPLAY_MERGE archive resources
-    private final AeronArchive aeronArchive;
-    private final String replayChannelBase;
-    private final String replayDestination;
-    private final long recordingId;
-
-    // -------------------------------------------------------------------------
-    // Run-loop state
-    // -------------------------------------------------------------------------
-
-    private State state = State.LIVE;
-
-    // Current image being polled in LIVE state.
-    private Image image;
-
-    // The subscription that owns `image`. Initially the multicast subscription; after each
-    // recovery it is the promoted mergeSubscription. Closed when its image closes.
-    private Subscription liveSubscription;
-
-    // Exists only while a ReplayMerge is in progress. On merge completion, promoted to
-    // liveSubscription; replayMerge wrapper is closed and nulled.
-    private ReplayMerge  replayMerge;
-    private Subscription mergeSubscription;
-
-    private long lostPosition;
-    private long recoveryStartNs;
-    private long recoveryDeadlineNs       = Long.MAX_VALUE;
-    private long recoveryArchiveFragments;
-    private long recoveryLiveFragments;
-    private boolean recoveryInArchivePhase;
-    private boolean recoveryImageAcquiredLogged;
-    private boolean recoveryLiveAddedLogged;
-    private long    recoveryPreCheckLastLogNs = Long.MIN_VALUE;
+    private final EchoState echoState;
 
     // -------------------------------------------------------------------------
     // Counters
     // -------------------------------------------------------------------------
 
-    private long totalMessagesEchoed      = 0;
-    private long currentLivePhaseMessages = 0;
-    private long totalLiveMessages        = 0;
-    private long totalArchiveMessages     = 0;
-    private int  recoveryAttempts         = 0;
-    private long requestReceived          = 0;
-    private long responsesSend            = 0;
-
-    // Diagnostics
-    private long lastDiagTotalEchoed = 0;
-    private long lastDiagNs          = 0;
-    private long firstMessageNs      = 0;
+    private long requestReceived = 0;
+    private long responsesSend   = 0;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -204,8 +137,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         this.aeron           = aeron;
         this.ownsAeronClient = ownsAeronClient;
 
-        this.recoveryMode = RecoveryMode.valueOf(
-            System.getProperty(RECOVERY_MODE_PROP, RecoveryMode.GAP.name()));
+        final String recoveryMode = System.getProperty(RECOVERY_MODE_PROP, "GAP").toUpperCase();
 
         System.out.println("recoveryMode: " + recoveryMode);
         System.out.printf("%s.init(receiverIndex=%s)%n", RecoveringEchoNode.class.getSimpleName(), receiverIndex);
@@ -217,39 +149,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         publication = aeron.addExclusivePublication(sourceChannel(), sourceStreamId());
         System.out.println("  publication created: sessionId=" + publication.sessionId());
 
-        liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
-        System.out.println("  subscription created");
-
-        if (recoveryMode == RecoveryMode.REPLAY_MERGE)
-        {
-            this.recordingId       = Long.getLong(RECORDING_ID_PROP, 0);
-            this.replayChannelBase = System.getProperty(REPLAY_CHANNEL_PROP);
-            this.replayDestination = System.getProperty(REPLAY_DESTINATION_PROP);
-
-            System.out.printf("%s connecting to archive: controlChannel=%s, controlStream=%s, " +
-                    "controlResponseChannel=%s%n",
-                ts(),
-                System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP),
-                System.getProperty(ARCHIVE_CONTROL_STREAM_PROP),
-                System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP));
-
-            this.aeronArchive = AeronArchive.connect(new AeronArchive.Context()
-                .controlRequestChannel(System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP))
-                .controlRequestStreamId(Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0))
-                .controlResponseChannel(System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP)));
-
-            System.out.printf("%s archive connected. recordingId=%d, replayChannelBase=%s, " +
-                    "replayDestination=%s, liveDestination=%s%n",
-                ts(), recordingId, replayChannelBase, replayDestination, destinationChannel());
-        }
-        else
-        {
-            this.recordingId       = -1;
-            this.replayChannelBase = null;
-            this.replayDestination = null;
-            this.aeronArchive      = null;
-        }
-
         fragmentHandler = (buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) != receiverIndex)
@@ -258,12 +157,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             }
 
             requestReceived++;
-            if (lastDiagNs == 0)
-            {
-                firstMessageNs      = System.nanoTime();
-                lastDiagNs          = firstMessageNs;
-                lastDiagTotalEchoed = 0;
-            }
 
             long result;
             while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
@@ -283,23 +176,23 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                 }
             }
         };
-    }
 
-    // -------------------------------------------------------------------------
-    // Logging
-    // -------------------------------------------------------------------------
+        switch (recoveryMode)
+        {
+            case "GAP":
+                echoState = new GapState(aeron, publication, fragmentHandler);
+                break;
+            case "REPLAY_MERGE":
+                echoState = new ReplayMergeState(aeron, publication, fragmentHandler);
+                break;
+            case "PERSISTENT_SUBSCRIPTION":
+                echoState = new PersistentSubscriptionState(aeron, fragmentHandler);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown recovery mode: " + recoveryMode);
+        }
 
-    private static String ts()
-    {
-        return TS_FMT.format(Instant.now());
-    }
-
-    private static void log(final String fmt, final Object... args)
-    {
-        final Object[] fullArgs = new Object[args.length + 1];
-        fullArgs[0] = ts();
-        System.arraycopy(args, 0, fullArgs, 1, args.length);
-        System.out.printf("%s " + fmt + "%n", fullArgs);
+        System.out.println("  subscription created");
     }
 
     // -------------------------------------------------------------------------
@@ -308,399 +201,14 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     public void run()
     {
-        awaitConnected(
-            () -> liveSubscription.isConnected() && publication.availableWindow() > 0,
-            connectionTimeoutNs(),
-            SystemNanoClock.INSTANCE);
+        echoState.awaitConnected();
 
         final IdleStrategy idle = idleStrategy();
 
-        image = liveSubscription.imageAtIndex(0);
-        log("Image acquired: sessionId=%d, position=%d, mtu=%d, correlationId=%d",
-            image.sessionId(), image.position(), image.mtuLength(), image.correlationId());
-
-        log("State machine starting in LIVE");
-
-        long nextLogNs = System.nanoTime() + LOG_INTERVAL_NS;
-
         while (running.get())
         {
-            final int workCount = doWork();
-            idle.idle(workCount);
-
-            final long nowNs = System.nanoTime();
-            if (nowNs >= nextLogNs)
-            {
-                logDiagnostics();
-                nextLogNs = nowNs + LOG_INTERVAL_NS;
-            }
+            idle.idle(echoState.poll());
         }
-
-        log("Shutdown. totalEchoed=%,d, totalLive=%,d, totalArchive=%,d, recoveryAttempts=%d",
-            totalMessagesEchoed, totalLiveMessages, totalArchiveMessages, recoveryAttempts);
-    }
-
-    // -------------------------------------------------------------------------
-    // Dispatch
-    // -------------------------------------------------------------------------
-
-    private int doWork()
-    {
-        switch (state)
-        {
-            case LIVE:       return doLive();
-            case RECOVERING: return doRecovery();
-            default:
-                throw new IllegalStateException("Unknown state: " + state);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // LIVE
-    // -------------------------------------------------------------------------
-
-    private int doLive()
-    {
-        if (image.isClosed())
-        {
-            lostPosition = image.position();
-            log("Image CLOSED in LIVE: position=%d, totalEchoed=%,d, currentLivePhase=%,d",
-                lostPosition, totalMessagesEchoed, currentLivePhaseMessages);
-            totalLiveMessages        += currentLivePhaseMessages;
-            currentLivePhaseMessages  = 0;
-
-            closeAll(liveSubscription);
-            liveSubscription = null;
-
-            state = State.RECOVERING;
-            return 1;
-        }
-
-        final int fragments = image.poll(fragmentHandler, FRAGMENT_LIMIT);
-        if (fragments > 0)
-        {
-            totalMessagesEchoed      += fragments;
-            currentLivePhaseMessages += fragments;
-        }
-
-        return fragments;
-    }
-
-    // -------------------------------------------------------------------------
-    // RECOVERING — dispatch
-    // -------------------------------------------------------------------------
-
-    private int doRecovery()
-    {
-        switch (recoveryMode)
-        {
-            case GAP:             return doRecoveryGap();
-            case REPLAY_MERGE:    return doRecoveryReplayMerge();
-            case REPLAY_MERGE_V2: return doRecoveryReplayMergeV2();
-            default:
-                throw new IllegalStateException("Unknown recovery mode: " + recoveryMode);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // RECOVERING — GAP
-    // -------------------------------------------------------------------------
-
-    private int doRecoveryGap()
-    {
-        if (liveSubscription == null)
-        {
-            liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
-        }
-
-        if (liveSubscription.imageCount() > 0)
-        {
-            image = liveSubscription.imageAtIndex(0);
-            log("RECOVERING (GAP): new image acquired. sessionId=%d, position=%d",
-                image.sessionId(), image.position());
-            state = State.LIVE;
-            return 1;
-        }
-
-        return 0;
-    }
-
-    // -------------------------------------------------------------------------
-    // RECOVERING — REPLAY_MERGE
-    // -------------------------------------------------------------------------
-
-    private int doRecoveryReplayMerge()
-    {
-        if (replayMerge != null && System.nanoTime() > recoveryDeadlineNs)
-        {
-            throw new IllegalStateException(
-                "ReplayMerge TIMED OUT on attempt #" + recoveryAttempts +
-                    ", lostPosition=" + lostPosition +
-                    ", elapsedMs=" + ((System.nanoTime() - recoveryStartNs) / 1_000_000) +
-                    ", archiveFragments=" + recoveryArchiveFragments +
-                    ", liveFragments=" + recoveryLiveFragments);
-        }
-
-        if (replayMerge == null)
-        {
-            recoveryStartNs             = System.nanoTime();
-            recoveryDeadlineNs          = recoveryStartNs + connectionTimeoutNs();
-            recoveryArchiveFragments    = 0;
-            recoveryLiveFragments       = 0;
-            recoveryInArchivePhase      = true;
-            recoveryImageAcquiredLogged = false;
-            recoveryLiveAddedLogged     = false;
-
-            final long archivePosition = aeronArchive.getRecordingPosition(recordingId);
-
-            if (archivePosition <= lostPosition)
-            {
-                final long nowNs = System.nanoTime();
-                if (nowNs - recoveryPreCheckLastLogNs >= LOG_INTERVAL_NS)
-                {
-                    log("RECOVERING (REPLAY_MERGE) pre-check: archive not ahead — " +
-                            "lostPosition=%d, archivePosition=%d, waiting...",
-                        lostPosition, archivePosition);
-                    recoveryPreCheckLastLogNs = nowNs;
-                }
-                recoveryStartNs    = 0;
-                recoveryDeadlineNs = Long.MAX_VALUE;
-                return 0;
-            }
-
-            recoveryAttempts++;
-            recoveryPreCheckLastLogNs = Long.MIN_VALUE;
-
-            log("RECOVERING #%d (REPLAY_MERGE) pre-check: lostPosition=%d, " +
-                    "archivePosition=%d, delta=%d",
-                recoveryAttempts, lostPosition, archivePosition, archivePosition - lostPosition);
-
-            final long[] startPosHolder  = new long[1];
-            final long[] stopPosHolder   = new long[1];
-            final int[]  sessionIdHolder = new int[1];
-            final int found = aeronArchive.listRecording(
-                recordingId,
-                (controlSessionId, correlationId, recordingId1, startTimestamp, stopTimestamp,
-                 startPosition, stopPosition, initialTermId, segmentFileLength, termBufferLength,
-                 mtuLength, sessionId, streamId, strippedChannel, originalChannel, sourceIdentity) ->
-                {
-                    sessionIdHolder[0] = sessionId;
-                    startPosHolder[0]  = startPosition;
-                    stopPosHolder[0]   = stopPosition;
-                });
-
-            if (found == 0)
-            {
-                throw new IllegalStateException("Recording not found for recordingId=" + recordingId);
-            }
-
-            final int recordingSessionId = sessionIdHolder[0];
-            log("RECOVERING #%d (REPLAY_MERGE) positions: requestedReplayPosition=%d, " +
-                    "recordingStartPosition=%d, recordingStopPosition=%d, " +
-                    "currentArchivePosition=%d, bytesToReplay=%d",
-                recoveryAttempts,
-                lostPosition, startPosHolder[0], stopPosHolder[0],
-                archivePosition, archivePosition - lostPosition);
-
-            final String replayChannel = new ChannelUriStringBuilder(replayChannelBase)
-                .sessionId(recordingSessionId)
-                .build();
-
-            log("RECOVERING #%d (REPLAY_MERGE): initiating. recordingId=%d, " +
-                    "recordingSessionId=%d, replayChannel=%s, replayDestination=%s, liveDestination=%s",
-                recoveryAttempts, recordingId, recordingSessionId,
-                replayChannel, replayDestination, destinationChannel());
-
-            mergeSubscription = aeron.addSubscription(
-                new ChannelUriStringBuilder()
-                    .media("udp")
-                    .controlMode("manual")
-                    .sessionId(recordingSessionId)
-                    .build(),
-                destinationStreamId());
-
-            replayMerge = new ReplayMerge(
-                mergeSubscription,
-                aeronArchive,
-                replayChannel,
-                replayDestination,
-                destinationChannel(),
-                recordingId,
-                lostPosition);
-
-            return 1;
-        }
-
-        if (replayMerge.hasFailed())
-        {
-            throw new IllegalStateException(
-                "ReplayMerge FAILED on attempt #" + recoveryAttempts +
-                    ", lostPosition=" + lostPosition +
-                    ", archiveFragments=" + recoveryArchiveFragments +
-                    ", liveFragments=" + recoveryLiveFragments);
-        }
-
-        final int fragments = replayMerge.poll(fragmentHandler, FRAGMENT_LIMIT);
-
-        if (recoveryInArchivePhase)
-        {
-            recoveryArchiveFragments += fragments;
-        }
-        else
-        {
-            recoveryLiveFragments += fragments;
-        }
-
-        if (!recoveryImageAcquiredLogged && replayMerge.image() != null)
-        {
-            final Image img = replayMerge.image();
-            log("RECOVERING #%d (REPLAY_MERGE): replay image ACQUIRED. " +
-                    "sessionId=%d, joinPosition=%d, currentPosition=%d, " +
-                    "requestedPosition=%d, joinDelta=%d",
-                recoveryAttempts,
-                img.sessionId(), img.joinPosition(), img.position(),
-                lostPosition, img.joinPosition() - lostPosition);
-            recoveryImageAcquiredLogged = true;
-        }
-
-        if (!recoveryLiveAddedLogged && replayMerge.isLiveAdded())
-        {
-            final Image img = replayMerge.image();
-            log("RECOVERING #%d (REPLAY_MERGE): live destination ADDED. " +
-                    "archiveFragments=%,d, imagePosition=%d",
-                recoveryAttempts,
-                recoveryArchiveFragments, img != null ? img.position() : -1L);
-            recoveryInArchivePhase  = false;
-            recoveryLiveAddedLogged = true;
-        }
-
-        if (replayMerge.isMerged())
-        {
-            final Image mergedImage = mergeSubscription.imageAtIndex(0);
-            final long elapsedMs    = (System.nanoTime() - recoveryStartNs) / 1_000_000;
-
-            log("RECOVERING #%d (REPLAY_MERGE): MERGED. " +
-                    "sessionId=%d, joinPosition=%d, position=%d, " +
-                    "requestedPosition=%d, joinDelta=%d, " +
-                    "archiveFragments=%,d, liveFragments=%,d, elapsedMs=%,d",
-                recoveryAttempts,
-                mergedImage.sessionId(), mergedImage.joinPosition(), mergedImage.position(),
-                lostPosition, mergedImage.joinPosition() - lostPosition,
-                recoveryArchiveFragments, recoveryLiveFragments, elapsedMs);
-
-            totalArchiveMessages += recoveryArchiveFragments;
-            totalMessagesEchoed  += recoveryArchiveFragments + recoveryLiveFragments;
-
-            log("Merge #%d counters: archiveDelta=%,d, liveDelta=%,d, " +
-                    "totalArchive=%,d, totalLive=%,d, total=%,d",
-                recoveryAttempts,
-                recoveryArchiveFragments, recoveryLiveFragments,
-                totalArchiveMessages, totalLiveMessages, totalMessagesEchoed);
-
-            replayMerge.close();
-            replayMerge = null;
-
-            image             = mergedImage;
-            liveSubscription  = mergeSubscription;
-            mergeSubscription = null;
-
-            currentLivePhaseMessages = 0;
-            state                    = State.LIVE;
-            return 1;
-        }
-
-        return fragments;
-    }
-
-    // -------------------------------------------------------------------------
-    // RECOVERING — REPLAY_MERGE_V2
-    // -------------------------------------------------------------------------
-
-    private int doRecoveryReplayMergeV2()
-    {
-        throw new UnsupportedOperationException("REPLAY_MERGE_V2 is not yet implemented");
-    }
-
-    // -------------------------------------------------------------------------
-    // Periodic diagnostics
-    // -------------------------------------------------------------------------
-
-    private void logDiagnostics()
-    {
-        final String stateDetails;
-        switch (state)
-        {
-            case LIVE:
-                stateDetails = String.format("imagePosition=%d", image.position());
-                break;
-
-            case RECOVERING:
-                switch (recoveryMode)
-                {
-                    case GAP:
-                        stateDetails = String.format(
-                            "mode=GAP, lostPosition=%d, waitingForImage=%b",
-                            lostPosition,
-                            liveSubscription == null || liveSubscription.imageCount() == 0);
-                        break;
-
-                    case REPLAY_MERGE:
-                    {
-                        final Image rImg = replayMerge != null ? replayMerge.image() : null;
-                        stateDetails = String.format(
-                            "mode=REPLAY_MERGE, attempt=%d, lostPosition=%d, " +
-                                "archiveFragments=%,d, liveFragments=%,d, " +
-                                "imageAcquired=%b, liveAdded=%b, merged=%b, " +
-                                "replayImagePosition=%d, elapsedMs=%,d, remainingMs=%,d",
-                            recoveryAttempts,
-                            lostPosition,
-                            recoveryArchiveFragments,
-                            recoveryLiveFragments,
-                            recoveryImageAcquiredLogged,
-                            recoveryLiveAddedLogged,
-                            replayMerge != null && replayMerge.isMerged(),
-                            rImg != null ? rImg.position() : -1L,
-                            recoveryStartNs > 0 ? (System.nanoTime() - recoveryStartNs) / 1_000_000 : 0,
-                            recoveryDeadlineNs == Long.MAX_VALUE ? Long.MAX_VALUE :
-                                Math.max(0, (recoveryDeadlineNs - System.nanoTime()) / 1_000_000));
-                        break;
-                    }
-
-                    case REPLAY_MERGE_V2:
-                        stateDetails = "mode=REPLAY_MERGE_V2, not yet implemented";
-                        break;
-
-                    default:
-                        throw new IllegalStateException("Unknown recovery mode: " + recoveryMode);
-                }
-                break;
-
-            default:
-                throw new IllegalStateException("Unknown state: " + state);
-        }
-
-        final long nowNs           = System.nanoTime();
-        final long echoDelta       = totalMessagesEchoed - lastDiagTotalEchoed;
-        final long elapsedMs       = lastDiagNs > 0 ? (nowNs - lastDiagNs) / 1_000_000 : 0;
-        final long ratePerSec      = elapsedMs > 0 ? echoDelta * 1000 / elapsedMs : 0;
-        final long totalElapsedMs  = firstMessageNs > 0 ? (nowNs - firstMessageNs) / 1_000_000 : 0;
-        final long totalRatePerSec = totalElapsedMs > 0 ? totalMessagesEchoed * 1000 / totalElapsedMs : 0;
-        lastDiagTotalEchoed        = totalMessagesEchoed;
-        lastDiagNs                 = nowNs;
-
-        log("[DIAG] state=%s, rate=%,d/s, totalRate=%,d/s, totalEchoed=%,d, requests=%,d, responses=%,d, " +
-                "totalLive=%,d, totalArchive=%,d, currentLivePhase=%,d, recoveryAttempts=%d | %s",
-            state,
-            ratePerSec,
-            totalRatePerSec,
-            totalMessagesEchoed,
-            requestReceived,
-            responsesSend,
-            totalLiveMessages,
-            totalArchiveMessages,
-            currentLivePhaseMessages,
-            recoveryAttempts,
-            stateDetails);
     }
 
     // -------------------------------------------------------------------------
@@ -709,22 +217,13 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
 
     public void close()
     {
-        log("RecoveringEchoNode: closing");
-        if (replayMerge != null)
-        {
-            replayMerge.close();
-            replayMerge = null;
-        }
-        closeAll(mergeSubscription);
-        closeAll(aeronArchive);
-        closeAll(liveSubscription);
+        closeAll(echoState);
         closeAll(publication);
 
         if (ownsAeronClient)
         {
             closeAll(aeron, mediaDriver);
         }
-        log("RecoveringEchoNode: closed");
     }
 
     // -------------------------------------------------------------------------
@@ -737,13 +236,14 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         final Path outputDir     = Configuration.resolveLogsDir();
         final int  receiverIndex = AeronUtil.receiverIndex();
 
+        Thread.currentThread().setName("echo");
+
         final AtomicBoolean running = new AtomicBoolean(true);
         try (
             ShutdownSignalBarrier shutdownSignalBarrier =
                 new ShutdownSignalBarrier(() -> running.set(false));
             RecoveringEchoNode node = new RecoveringEchoNode(running))
         {
-            Thread.currentThread().setName("echo");
 
             try
             {
@@ -760,6 +260,383 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                     outputDir.resolve(prefix + "aeron-stat.txt"),
                     outputDir.resolve(prefix + "errors.txt"));
             }
+        }
+    }
+
+    // =========================================================================
+    // EchoState — common interface
+    // =========================================================================
+
+    interface EchoState extends AutoCloseable
+    {
+        void awaitConnected();
+        int poll();
+        void close();
+    }
+
+    // =========================================================================
+    // GapState
+    // =========================================================================
+
+    static final class GapState implements EchoState
+    {
+        private final Aeron aeron;
+        private final ExclusivePublication publication;
+        private final FragmentHandler fragmentHandler;
+
+        private Subscription liveSubscription;
+        private Image image;
+        private boolean live = true;
+
+        GapState(final Aeron aeron, final ExclusivePublication publication, final FragmentHandler fragmentHandler)
+        {
+            this.aeron            = aeron;
+            this.publication      = publication;
+            this.fragmentHandler  = fragmentHandler;
+            this.liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
+        }
+
+        public void awaitConnected()
+        {
+            AeronUtil.awaitConnected(
+                () -> liveSubscription.isConnected() && publication.availableWindow() > 0,
+                connectionTimeoutNs(),
+                SystemNanoClock.INSTANCE);
+            image = liveSubscription.imageAtIndex(0);
+        }
+
+        public int poll()
+        {
+            return live ? doLive() : doRecovery();
+        }
+
+        private int doLive()
+        {
+            if (image.isClosed())
+            {
+                closeAll(liveSubscription);
+                liveSubscription = null;
+                live = false;
+                return 1;
+            }
+
+            return image.poll(fragmentHandler, FRAGMENT_LIMIT);
+        }
+
+        private int doRecovery()
+        {
+            if (liveSubscription == null)
+            {
+                liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
+            }
+
+            if (liveSubscription.imageCount() > 0)
+            {
+                image = liveSubscription.imageAtIndex(0);
+                live  = true;
+                return 1;
+            }
+
+            return 0;
+        }
+
+        public void close()
+        {
+            closeAll(liveSubscription);
+        }
+    }
+
+    // =========================================================================
+    // ReplayMergeState
+    // =========================================================================
+
+    static final class ReplayMergeState implements EchoState
+    {
+        private final Aeron aeron;
+        private final ExclusivePublication publication;
+        private final FragmentHandler fragmentHandler;
+        private final AeronArchive aeronArchive;
+        private final String replayChannelBase;
+        private final String replayDestination;
+        private final long recordingId;
+
+        private Subscription liveSubscription;
+        private Subscription mergeSubscription;
+        private ReplayMerge  replayMerge;
+        private Image image;
+        private boolean live = true;
+
+        private long lostPosition;
+        private long recoveryStartNs;
+        private long recoveryDeadlineNs      = Long.MAX_VALUE;
+        private long recoveryArchiveFragments;
+        private long recoveryLiveFragments;
+        private boolean recoveryInArchivePhase;
+        private int recoveryAttempts;
+
+        ReplayMergeState(final Aeron aeron, final ExclusivePublication publication, final FragmentHandler fragmentHandler)
+        {
+            this.aeron             = aeron;
+            this.publication       = publication;
+            this.fragmentHandler   = fragmentHandler;
+            this.recordingId       = Long.getLong(RECORDING_ID_PROP, 0);
+            this.replayChannelBase = System.getProperty(REPLAY_CHANNEL_PROP);
+            this.replayDestination = System.getProperty(REPLAY_DESTINATION_PROP);
+
+            System.out.printf("%s connecting to archive: controlChannel=%s, controlStream=%s, " +
+                    "controlResponseChannel=%s%n",
+                ReplayMergeState.class.getSimpleName(),
+                System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP),
+                System.getProperty(ARCHIVE_CONTROL_STREAM_PROP),
+                System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP));
+
+            this.aeronArchive = AeronArchive.connect(new AeronArchive.Context()
+                .controlRequestChannel(System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP))
+                .controlRequestStreamId(Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0))
+                .controlResponseChannel(System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP)));
+
+            System.out.printf("  archive connected. recordingId=%d, replayChannelBase=%s, " +
+                    "replayDestination=%s, liveDestination=%s%n",
+                recordingId, replayChannelBase, replayDestination, destinationChannel());
+
+            this.liveSubscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
+        }
+
+        public void awaitConnected()
+        {
+            AeronUtil.awaitConnected(
+                () -> liveSubscription.isConnected() && publication.availableWindow() > 0,
+                connectionTimeoutNs(),
+                SystemNanoClock.INSTANCE);
+            image = liveSubscription.imageAtIndex(0);
+        }
+
+        public int poll()
+        {
+            return live ? doLive() : doRecovery();
+        }
+
+        private int doLive()
+        {
+            if (image.isClosed())
+            {
+                lostPosition = image.position();
+                closeAll(liveSubscription);
+                liveSubscription = null;
+                live = false;
+                return 1;
+            }
+
+            return image.poll(fragmentHandler, FRAGMENT_LIMIT);
+        }
+
+        private int doRecovery()
+        {
+            if (replayMerge != null && System.nanoTime() > recoveryDeadlineNs)
+            {
+                throw new IllegalStateException(
+                    "ReplayMerge TIMED OUT on attempt #" + recoveryAttempts +
+                        ", lostPosition=" + lostPosition +
+                        ", elapsedMs=" + ((System.nanoTime() - recoveryStartNs) / 1_000_000) +
+                        ", archiveFragments=" + recoveryArchiveFragments +
+                        ", liveFragments=" + recoveryLiveFragments);
+            }
+
+            if (replayMerge == null)
+            {
+                recoveryStartNs          = System.nanoTime();
+                recoveryDeadlineNs       = recoveryStartNs + connectionTimeoutNs();
+                recoveryArchiveFragments = 0;
+                recoveryLiveFragments    = 0;
+                recoveryInArchivePhase   = true;
+
+                final long archivePosition = aeronArchive.getRecordingPosition(recordingId);
+
+                if (archivePosition <= lostPosition)
+                {
+                    recoveryStartNs    = 0;
+                    recoveryDeadlineNs = Long.MAX_VALUE;
+                    return 0;
+                }
+
+                recoveryAttempts++;
+
+                final int[] sessionIdHolder = new int[1];
+                final int found = aeronArchive.listRecording(
+                    recordingId,
+                    (controlSessionId, correlationId, recordingId1, startTimestamp, stopTimestamp,
+                     startPosition, stopPosition, initialTermId, segmentFileLength, termBufferLength,
+                     mtuLength, sessionId, streamId, strippedChannel, originalChannel, sourceIdentity) ->
+                        sessionIdHolder[0] = sessionId);
+
+                if (found == 0)
+                {
+                    throw new IllegalStateException("Recording not found for recordingId=" + recordingId);
+                }
+
+                final int recordingSessionId = sessionIdHolder[0];
+
+                final String replayChannel = new ChannelUriStringBuilder(replayChannelBase)
+                    .sessionId(recordingSessionId)
+                    .build();
+
+                mergeSubscription = aeron.addSubscription(
+                    new ChannelUriStringBuilder()
+                        .media("udp")
+                        .controlMode("manual")
+                        .sessionId(recordingSessionId)
+                        .build(),
+                    destinationStreamId());
+
+                replayMerge = new ReplayMerge(
+                    mergeSubscription,
+                    aeronArchive,
+                    replayChannel,
+                    replayDestination,
+                    destinationChannel(),
+                    recordingId,
+                    lostPosition);
+
+                return 1;
+            }
+
+            if (replayMerge.hasFailed())
+            {
+                throw new IllegalStateException(
+                    "ReplayMerge FAILED on attempt #" + recoveryAttempts +
+                        ", lostPosition=" + lostPosition +
+                        ", archiveFragments=" + recoveryArchiveFragments +
+                        ", liveFragments=" + recoveryLiveFragments);
+            }
+
+            final int fragments = replayMerge.poll(fragmentHandler, FRAGMENT_LIMIT);
+
+            if (recoveryInArchivePhase)
+            {
+                recoveryArchiveFragments += fragments;
+            }
+            else
+            {
+                recoveryLiveFragments += fragments;
+            }
+
+            if (recoveryInArchivePhase && replayMerge.isLiveAdded())
+            {
+                recoveryInArchivePhase = false;
+            }
+
+            if (replayMerge.isMerged())
+            {
+                replayMerge.close();
+                replayMerge      = null;
+
+                image             = mergeSubscription.imageAtIndex(0);
+                liveSubscription  = mergeSubscription;
+                mergeSubscription = null;
+                live              = true;
+                return 1;
+            }
+
+            return fragments;
+        }
+
+        public void close()
+        {
+            if (replayMerge != null)
+            {
+                replayMerge.close();
+                replayMerge = null;
+            }
+            closeAll(mergeSubscription, aeronArchive, liveSubscription);
+        }
+    }
+
+    // =========================================================================
+    // PersistentSubscriptionState
+    // =========================================================================
+
+    static final class PersistentSubscriptionState implements EchoState
+    {
+        private final PersistentSubscription persistentSubscription;
+        private final ControlledFragmentHandler controlledFragmentHandler;
+
+        PersistentSubscriptionState(final Aeron aeron, final FragmentHandler fragmentHandler)
+        {
+            this.controlledFragmentHandler = (buffer, offset, length, header) ->
+            {
+                fragmentHandler.onFragment(buffer, offset, length, header);
+                return ControlledFragmentHandler.Action.CONTINUE;
+            };
+
+            final long recordingId = Long.getLong(RECORDING_ID_PROP, 0);
+
+            System.out.printf("%s connecting to archive: controlChannel=%s, controlStream=%s, " +
+                    "controlResponseChannel=%s%n",
+                PersistentSubscriptionState.class.getSimpleName(),
+                System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP),
+                System.getProperty(ARCHIVE_CONTROL_STREAM_PROP),
+                System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP));
+
+            final AeronArchive.Context archiveContext = new AeronArchive.Context()
+                .controlRequestChannel(System.getProperty(ARCHIVE_CONTROL_CHANNEL_PROP))
+                .controlRequestStreamId(Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0))
+                .controlResponseChannel(System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP))
+                .aeron(aeron);
+
+
+            System.out.println("Waiting....");
+            try
+            {
+                Thread.sleep(30000);
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
+            System.out.println("Waiting complete....");
+
+
+            persistentSubscription = PersistentSubscription.create(
+                new PersistentSubscription.Context()
+                    .recordingId(recordingId)
+                    .startPosition(0)
+                    .replayStreamId(-5)
+                    .listener(new PersistentSubscriptionListener()
+                {
+                    @Override
+                    public void onLive()
+                    {
+                        System.out.println("onLive");
+                    }
+
+                    @Override
+                    public void onError(Exception e)
+                    {
+                        e.printStackTrace();
+                    }
+                })
+                    .replayChannel(System.getProperty(REPLAY_CHANNEL_PROP))
+                    .liveChannel(destinationChannel())
+                    .liveStreamId(destinationStreamId())
+                    .aeronArchiveContext(archiveContext));
+
+            System.out.printf("  PersistentSubscription created. recordingId=%d, liveChannel=%s%n",
+                recordingId, destinationChannel());
+        }
+
+        public void awaitConnected()
+        {
+            // PersistentSubscription manages its own connection lifecycle internally.
+        }
+
+        public int poll()
+        {
+            return persistentSubscription.controlledPoll(controlledFragmentHandler, FRAGMENT_LIMIT);
+        }
+
+        public void close()
+        {
+            closeAll(persistentSubscription);
         }
     }
 }
