@@ -19,7 +19,6 @@ import org.HdrHistogram.ValueRecorder;
 import org.agrona.concurrent.NanoClock;
 
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 import static java.util.Objects.requireNonNull;
 
@@ -37,11 +36,9 @@ abstract class MessageTransceiverLhsPadding
 
 abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 {
-    public static final AtomicLongFieldUpdater<MessageTransceiverHotFields> RECEIVED_MESSAGES_UPDATER =
-        AtomicLongFieldUpdater.newUpdater(MessageTransceiverHotFields.class, "receivedMessages");
     protected final NanoClock clock;
     final ValueRecorder valueRecorder;
-    volatile long receivedMessages;
+    protected long receivedMessages;
 
     MessageTransceiverHotFields(final NanoClock clock, final ValueRecorder valueRecorder)
     {
@@ -51,7 +48,7 @@ abstract class MessageTransceiverHotFields extends MessageTransceiverLhsPadding
 
     final long receivedMessages()
     {
-        return RECEIVED_MESSAGES_UPDATER.get(this);
+        return receivedMessages;
     }
 }
 
@@ -150,17 +147,35 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
         }
 
         valueRecorder.recordValue(clock.nanoTime() - timestamp);
-        RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
+        receivedMessages++;
     }
 
-    public long expectedResponseMessages(final long iterations, final long messageRate)
+    /**
+     * Callback method to be invoked for every message received.
+     * <p>
+     * Normally you want to use the {@link #onMessageReceived(long, long)} and rely on the ValueRecorder
+     * inside the MessageTransceiver. But when there are multiple ValueRecorder instances, then this method
+     * should be used.
+     *
+     * @param valueRecorder the ValueRecorder used to record the value
+     * @param timestamp from the received message.
+     * @param checksum  from the received message.
+     */
+    protected final void onMessageReceived(
+        final ValueRecorder valueRecorder, final long timestamp, final long checksum)
     {
-        return iterations * messageRate;
+        if (CHECKSUM != checksum)
+        {
+            throw new IllegalStateException("Invalid checksum: expected=" + CHECKSUM + ", actual=" + checksum);
+        }
+
+        valueRecorder.recordValue(clock.nanoTime() - timestamp);
+        receivedMessages++;
     }
 
-    final void reset()
+    public void reset()
     {
         valueRecorder.reset();
-        RECEIVED_MESSAGES_UPDATER.set(this, 0);
+        receivedMessages = 0;
     }
 }

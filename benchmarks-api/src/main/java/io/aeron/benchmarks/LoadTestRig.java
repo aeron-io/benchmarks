@@ -16,6 +16,7 @@
 package io.aeron.benchmarks;
 
 import org.HdrHistogram.ValueRecorder;
+import org.agrona.CloseHelper;
 import org.agrona.LangUtil;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
@@ -47,7 +48,7 @@ import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 public final class LoadTestRig
 {
     private static final long NANOS_PER_SECOND = SECONDS.toNanos(1);
-    private static final long RECEIVE_DEADLINE_NS = SECONDS.toNanos(60);
+    private static final long RECEIVE_DEADLINE_NS = SECONDS.toNanos(3);
     private final Configuration configuration;
     private final MessageTransceiver messageTransceiver;
     private final PrintStream out;
@@ -57,8 +58,12 @@ public final class LoadTestRig
 
     public LoadTestRig(final Configuration configuration)
     {
-        this(configuration, SystemNanoClock.INSTANCE, null,
-            null, null, System.out, null);
+        this.configuration = requireNonNull(configuration);
+        this.out = System.out;
+        this.clock = SystemNanoClock.INSTANCE;
+        this.histogramSet = new PersistedHistogramSet(configuration);
+        this.messageTransceiver = createTransceiver(configuration, this.clock, this.histogramSet, null);
+        this.progressReporter = buildProgressReporter(configuration, this.out);
     }
 
     public LoadTestRig(
@@ -67,7 +72,12 @@ public final class LoadTestRig
         final PersistedHistogram persistedHistogram,
         final PrintStream out)
     {
-        this(configuration, nanoClock, persistedHistogram, null, null, out, null);
+        this.configuration = requireNonNull(configuration);
+        this.out = requireNonNull(out);
+        this.clock = requireNonNull(nanoClock);
+        this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
+        this.messageTransceiver = createTransceiver(configuration, nanoClock, this.histogramSet, persistedHistogram);
+        this.progressReporter = buildProgressReporter(configuration, out);
     }
 
     public LoadTestRig(
@@ -77,7 +87,13 @@ public final class LoadTestRig
         final BiFunction<NanoClock, ValueRecorder, MessageTransceiver> transceiverFactory,
         final PrintStream out)
     {
-        this(configuration, nanoClock, persistedHistogram, null, transceiverFactory, out, null);
+        this.configuration = requireNonNull(configuration);
+        this.out = requireNonNull(out);
+        this.clock = requireNonNull(nanoClock);
+        this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
+        this.messageTransceiver = requireNonNull(transceiverFactory)
+            .apply(nanoClock, persistedHistogram.valueRecorder());
+        this.progressReporter = buildProgressReporter(configuration, out);
     }
 
     LoadTestRig(
@@ -88,59 +104,14 @@ public final class LoadTestRig
         final PersistedHistogram persistedHistogram,
         final ProgressReporter progressReporter)
     {
-        this(configuration, clock, persistedHistogram, messageTransceiver, null, out, progressReporter);
-    }
-
-    private LoadTestRig(
-        final Configuration configuration,
-        final NanoClock nanoClock,
-        final PersistedHistogram persistedHistogram,
-        final MessageTransceiver messageTransceiver,
-        final BiFunction<NanoClock, ValueRecorder, MessageTransceiver> transceiverFactory,
-        final PrintStream out,
-        final ProgressReporter progressReporter)
-    {
         this.configuration = requireNonNull(configuration);
         this.out = requireNonNull(out);
-        this.clock = requireNonNull(nanoClock);
-
-        if (persistedHistogram != null)
-        {
-            this.histogramSet = PersistedHistogramSet.wrap(configuration.outputFileNamePrefix(), persistedHistogram);
-        }
-        else
-        {
-            this.histogramSet = new PersistedHistogramSet(configuration);
-        }
-
-        if (messageTransceiver != null)
-        {
-            this.messageTransceiver = messageTransceiver;
-        }
-        else if (transceiverFactory != null)
-        {
-            this.messageTransceiver = transceiverFactory.apply(nanoClock, persistedHistogram.valueRecorder());
-        }
-        else
-        {
-            final ValueRecorder valueRecorder = persistedHistogram != null ?
-                persistedHistogram.valueRecorder() : null;
-            this.messageTransceiver = createTransceiver(
-                configuration, nanoClock, this.histogramSet, valueRecorder);
-        }
-
-        if (progressReporter != null)
-        {
-            this.progressReporter = progressReporter;
-        }
-        else if (configuration.reportProgress())
-        {
-            this.progressReporter = new AsyncProgressReporter(out, new OneToOneConcurrentArrayQueue<>(16));
-        }
-        else
-        {
-            this.progressReporter = ProgressReporter.NULL_PROGRESS_REPORTER;
-        }
+        this.clock = requireNonNull(clock);
+        this.histogramSet = persistedHistogram != null ?
+            PersistedHistogramSet.wrap(configuration, persistedHistogram) :
+            new PersistedHistogramSet(configuration);
+        this.messageTransceiver = requireNonNull(messageTransceiver);
+        this.progressReporter = requireNonNull(progressReporter);
     }
 
     /**
@@ -191,28 +162,23 @@ public final class LoadTestRig
             progressReporter.reset();
 
             out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
-            histogramSet.outputPercentileDistributions(
-                out, Configuration.outputScaleRatio(configuration.outputTimeUnit()));
+            histogramSet.outputPercentileDistributions(out);
 
-            final long expectedTotalRequests = (long)configuration.iterations() * configuration.messageRate();
-            final long expectedTotalResponses = messageTransceiver.expectedResponseMessages(
-                configuration.iterations(), configuration.messageRate());
+            final long expectedTotalNumberOfMessages = configuration.iterations() * (long)configuration.messageRate();
+            warnIfTargetRateNotAchieved(result, expectedTotalNumberOfMessages);
 
-            warnIfTargetRateNotAchieved(result, expectedTotalRequests, expectedTotalResponses);
-
-            final PersistedHistogram.Status status = result.status(expectedTotalRequests, expectedTotalResponses);
-
-            histogramSet.saveAll(configuration.outputDirectory(), status);
+            final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);
+            histogramSet.saveAll(status);
         }
         finally
         {
             messageTransceiver.destroy();
-            histogramSet.closeAll();
+            CloseHelper.close(histogramSet);
         }
     }
 
     @SuppressWarnings("MethodLength")
-    SendResult send(final int iterations, final int messageRate)
+    SendResult send(final int iterations, final int numberOfMessages)
     {
         final MessageTransceiver messageTransceiver = this.messageTransceiver;
         final NanoClock clock = this.clock;
@@ -222,9 +188,8 @@ public final class LoadTestRig
         // The `sendIntervalNs` might be off if the division is not exact in which case more messages will be sent per
         // second than specified via `numberOfMessages`. However, this guarantees that the duration of the send
         // operation is bound by the number of iterations.
-        final long sendIntervalNs = NANOS_PER_SECOND * burstSize / messageRate;
-        final long totalNumberOfRequests = (long)iterations * messageRate;
-        final long totalNumberOfResponses = messageTransceiver.expectedResponseMessages(iterations, messageRate);
+        final long sendIntervalNs = NANOS_PER_SECOND * burstSize / numberOfMessages;
+        final long totalNumberOfMessages = (long)iterations * numberOfMessages;
         final long startTimeNs = clock.nanoTime();
         final long stopTimeNs = startTimeNs + (iterations * NANOS_PER_SECOND);
 
@@ -232,13 +197,13 @@ public final class LoadTestRig
         long nowNs = startTimeNs, timestampNs = startTimeNs;
         long nextReportTimeNs = startTimeNs + NANOS_PER_SECOND;
 
-        int batchSize = (int)min(totalNumberOfRequests, burstSize);
-        while (sentMessages < totalNumberOfRequests)
+        int batchSize = (int)min(totalNumberOfMessages, burstSize);
+        while (sentMessages < totalNumberOfMessages)
         {
             final int sent = messageTransceiver.send(batchSize, messageSize, timestampNs, CHECKSUM);
             sentMessages += sent;
 
-            if (totalNumberOfRequests == sentMessages)
+            if (totalNumberOfMessages == sentMessages)
             {
                 progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);
                 break;
@@ -247,7 +212,7 @@ public final class LoadTestRig
             nowNs = clock.nanoTime();
             if (sent == batchSize)
             {
-                batchSize = (int)min(totalNumberOfRequests - sentMessages, burstSize);
+                batchSize = (int)min(totalNumberOfMessages - sentMessages, burstSize);
                 timestampNs += sendIntervalNs;
                 long receivedMessageCount = 0;
                 while (nowNs < timestampNs && nowNs < stopTimeNs)
@@ -258,8 +223,7 @@ public final class LoadTestRig
                         nextReportTimeNs += NANOS_PER_SECOND;
                     }
 
-                    final long expectedResponsesSoFar = sentMessages * totalNumberOfResponses / totalNumberOfRequests;
-                    if (receivedMessageCount < expectedResponsesSoFar)
+                    if (receivedMessageCount < sentMessages)
                     {
                         messageTransceiver.receive();
                         final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -299,12 +263,10 @@ public final class LoadTestRig
             }
         }
 
-        System.out.println("Starting cooldown");
-
         idleStrategy.reset();
         long receivedMessageCount = messageTransceiver.receivedMessages();
         final long deadline = clock.nanoTime() + RECEIVE_DEADLINE_NS;
-        while (receivedMessageCount < totalNumberOfResponses)
+        while (receivedMessageCount < sentMessages)
         {
             messageTransceiver.receive();
             final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -326,30 +288,41 @@ public final class LoadTestRig
         return new SendResult(sentMessages, receivedMessageCount);
     }
 
-    private void warnIfTargetRateNotAchieved(
-        final SendResult result,
-        final long expectedTotalRequests,
-        final long expectedTotalResponses)
+    private void warnIfTargetRateNotAchieved(final SendResult result, final long expectedTotalNumberOfMessages)
     {
-        if (expectedTotalRequests != result.sentMessages)
+        if (expectedTotalNumberOfMessages != result.sentMessages)
         {
             out.printf(
                 "%n*** WARNING: Target message rate not achieved: expected to send %,d messages in " +
                 "total but managed to send only %,d messages (loss %.4f%%)!%n",
-                expectedTotalRequests,
+                expectedTotalNumberOfMessages,
                 result.sentMessages,
-                100.0 - (100.0 * result.sentMessages / expectedTotalRequests));
+                100.0 - (100.0 * result.sentMessages / expectedTotalNumberOfMessages));
         }
 
-        if (expectedTotalResponses != result.receivedMessages)
+        if (result.sentMessages != result.receivedMessages)
         {
             out.printf(
                 "%n*** WARNING: Not all messages were received after %ds deadline: expected %,d vs received " +
                 "%,d (loss %.4f%%)!%n",
                 NANOSECONDS.toSeconds(RECEIVE_DEADLINE_NS),
-                expectedTotalResponses,
+                result.sentMessages,
                 result.receivedMessages,
-                100.0 - (100.0 * result.receivedMessages / expectedTotalResponses));
+                100.0 - (100.0 * result.receivedMessages / result.sentMessages));
+        }
+    }
+
+    private static ProgressReporter buildProgressReporter(
+        final Configuration configuration,
+        final PrintStream out)
+    {
+        if (configuration.reportProgress())
+        {
+            return new AsyncProgressReporter(out, new OneToOneConcurrentArrayQueue<>(16));
+        }
+        else
+        {
+            return ProgressReporter.NULL_PROGRESS_REPORTER;
         }
     }
 
@@ -357,7 +330,7 @@ public final class LoadTestRig
         final Configuration configuration,
         final NanoClock nanoClock,
         final PersistedHistogramSet histogramSet,
-        final ValueRecorder valueRecorder)
+        final PersistedHistogram persistedHistogram)
     {
         final Class<? extends MessageTransceiver> clazz = configuration.messageTransceiverClass();
 
@@ -366,36 +339,43 @@ public final class LoadTestRig
             for (final Constructor<?> constructor : clazz.getConstructors())
             {
                 final Class<?>[] params = constructor.getParameterTypes();
-                if (params.length == 2 && params[0] == NanoClock.class)
+                if (params.length != 2 || params[0] != NanoClock.class)
                 {
-                    if (params[1] == PersistedHistogramSet.class)
-                    {
-                        return clazz.cast(constructor.newInstance(nanoClock, histogramSet));
-                    }
+                    continue;
+                }
 
-                    if (params[1] == ValueRecorder.class)
-                    {
-                        ValueRecorder newValueRecorder = valueRecorder;
-                        if (newValueRecorder == null)
-                        {
-                            newValueRecorder = histogramSet.create(
-                                configuration.outputFileNamePrefix()).valueRecorder();
-                        }
+                if (params[1] == PersistedHistogramSet.class)
+                {
+                    return clazz.cast(constructor.newInstance(nanoClock, histogramSet));
+                }
 
-                        return clazz.cast(constructor.newInstance(nanoClock, newValueRecorder));
-                    }
+                if (params[1] == ValueRecorder.class)
+                {
+                    final ValueRecorder recorder = resolveValueRecorder(
+                        persistedHistogram, histogramSet, configuration);
+                    return clazz.cast(constructor.newInstance(nanoClock, recorder));
                 }
             }
 
             throw new IllegalStateException(
                 "No suitable constructor found on " + clazz.getName() +
-                    ": expected (NanoClock, PersistedHistogramSet) or (NanoClock, ValueRecorder)");
+                ": expected (NanoClock, PersistedHistogramSet) or (NanoClock, ValueRecorder)");
         }
         catch (final ReflectiveOperationException ex)
         {
             LangUtil.rethrowUnchecked(ex);
             throw new Error();
         }
+    }
+
+    private static ValueRecorder resolveValueRecorder(
+        final PersistedHistogram persistedHistogram,
+        final PersistedHistogramSet histogramSet,
+        final Configuration configuration)
+    {
+        return persistedHistogram != null ?
+            persistedHistogram.valueRecorder() :
+            histogramSet.create(configuration.outputFileNamePrefix()).valueRecorder();
     }
 
     public static void main(final String[] args) throws Exception
@@ -418,9 +398,9 @@ public final class LoadTestRig
             this.receivedMessages = receivedMessages;
         }
 
-        PersistedHistogram.Status status(final long expectedRequests, final long expectedResponses)
+        PersistedHistogram.Status status(final long expectedNumberOfMessages)
         {
-            return expectedRequests == sentMessages && expectedResponses == receivedMessages ? OK : FAIL;
+            return expectedNumberOfMessages == sentMessages && expectedNumberOfMessages == receivedMessages ? OK : FAIL;
         }
     }
 }

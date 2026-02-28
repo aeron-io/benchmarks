@@ -21,33 +21,39 @@ import io.aeron.FragmentAssembler;
 import io.aeron.Image;
 import io.aeron.Subscription;
 import io.aeron.archive.client.AeronArchive;
-import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
-import org.HdrHistogram.ValueRecorder;
-import org.agrona.collections.MutableInteger;
-import org.agrona.concurrent.NanoClock;
-import org.agrona.concurrent.SystemNanoClock;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.benchmarks.MessageTransceiver;
+import io.aeron.driver.MediaDriver;
+import org.HdrHistogram.ValueRecorder;
+import org.agrona.concurrent.NanoClock;
+import org.agrona.concurrent.SystemNanoClock;
 
 import java.nio.file.Path;
 
 import static io.aeron.ChannelUri.addSessionId;
 import static io.aeron.archive.client.AeronArchive.connect;
+import static io.aeron.benchmarks.aeron.AeronUtil.FRAGMENT_LIMIT;
+import static io.aeron.benchmarks.aeron.AeronUtil.awaitConnected;
+import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.findLastRecordingId;
+import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.recordStream;
+import static io.aeron.benchmarks.aeron.AeronUtil.replayFullRecording;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceChannel;
+import static io.aeron.benchmarks.aeron.AeronUtil.sourceStreamId;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
-import static io.aeron.benchmarks.aeron.AeronUtil.*;
 
 public final class LiveReplayMessageTransceiver extends MessageTransceiver
 {
     private final MediaDriver mediaDriver;
     private final AeronArchive aeronArchive;
     private final boolean ownsArchiveClient;
-
     private ExclusivePublication publication;
-    private final BufferClaim bufferClaim = new BufferClaim();
-
     private Subscription subscription;
     private Image image;
     private final FragmentAssembler dataHandler = new FragmentAssembler(
@@ -57,8 +63,8 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
             final long checksum = buffer.getLong(offset + length - SIZE_OF_LONG, LITTLE_ENDIAN);
             onMessageReceived(timestamp, checksum);
         });
-    private final MutableInteger receiverIndex = new MutableInteger();
     private Path logsDir;
+    private MessageSender messageSender;
 
     public LiveReplayMessageTransceiver(
         final NanoClock nanoClock,
@@ -100,6 +106,8 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
         final String channel = addSessionId(replayChannel, (int)replaySessionId);
         subscription = aeron.addSubscription(channel, replayStreamId);
 
+        messageSender = MessageSender.create(publication, configuration.idleStrategy(), 1);
+
         awaitConnected(subscription::isConnected, connectionTimeoutNs, clock);
 
         image = subscription.imageAtIndex(0);
@@ -122,8 +130,7 @@ public final class LiveReplayMessageTransceiver extends MessageTransceiver
 
     public int send(final int numberOfMessages, final int messageLength, final long timestamp, final long checksum)
     {
-        return sendMessages(
-            publication, bufferClaim, numberOfMessages, messageLength, timestamp, checksum, receiverIndex, 1);
+        return messageSender.send(numberOfMessages, messageLength, timestamp, checksum);
     }
 
     public void receive()

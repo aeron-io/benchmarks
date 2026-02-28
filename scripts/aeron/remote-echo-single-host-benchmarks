@@ -344,6 +344,7 @@ do
           -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
           -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
           -Dio.aeron.benchmarks.output.directory=${BENCHMARKS_PATH}/${output_dir}\
+          -Dio.aeron.benchmarks.aeron.use.try.claim=${USE_TRY_CLAIM:-true}\
           -Dio.aeron.benchmarks.aeron.destination.channel=${DESTINATION_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.source.channel=${SOURCE_CHANNEL}\"\
           && export JAVA_HOME=\"${JAVA_HOME}\" OUTPUT_DIR=\"${BENCHMARKS_PATH}/${output_dir}\"\

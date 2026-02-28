@@ -25,7 +25,6 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static java.util.concurrent.TimeUnit.HOURS;
 
@@ -36,7 +35,7 @@ import static java.util.concurrent.TimeUnit.HOURS;
  * (e.g. one per receiver in a fan-out benchmark). The {@link LoadTestRig} uses this
  * factory to save all histograms at the end of a run.
  */
-public final class PersistedHistogramSet
+public final class PersistedHistogramSet implements AutoCloseable
 {
     private final Configuration configuration;
     private final Map<String, PersistedHistogram> histograms = new LinkedHashMap<>();
@@ -46,23 +45,18 @@ public final class PersistedHistogramSet
         this.configuration = configuration;
     }
 
-    private PersistedHistogramSet()
-    {
-        this.configuration = null;
-    }
-
     /**
      * Wrap a pre-existing {@link PersistedHistogram} in a factory.
      * Used for backward compatibility with constructors that receive a single histogram.
      *
-     * @param outputNamePrefix outputNamePrefix
+     * @param configuration     the Configuration
      * @param histogram        the existing histogram.
      * @return a factory containing the histogram under the name "result".
      */
-    public static PersistedHistogramSet wrap(final String outputNamePrefix, final PersistedHistogram histogram)
+    public static PersistedHistogramSet wrap(final Configuration configuration, final PersistedHistogram histogram)
     {
-        final PersistedHistogramSet factory = new PersistedHistogramSet();
-        factory.histograms.put(outputNamePrefix, histogram);
+        final PersistedHistogramSet factory = new PersistedHistogramSet(configuration);
+        factory.histograms.put(configuration.outputFileNamePrefix(), histogram);
         return factory;
     }
 
@@ -72,35 +66,29 @@ public final class PersistedHistogramSet
      * @param name the name used as the file prefix when saving. Must be unique.
      * @return a {@link ValueRecorder} that records into the named histogram.
      * @throws IllegalArgumentException if a histogram with the same name already exists.
-     * @throws IllegalStateException    if factory was created via {@link #wrap} (no configuration available).
      */
     public PersistedHistogram create(final String name)
     {
-        if (null == configuration)
-        {
-            throw new IllegalStateException("Cannot create new histograms on a wrapped factory");
-        }
-
         if (histograms.containsKey(name))
         {
             throw new IllegalArgumentException("Histogram already exists: " + name);
         }
 
-        PersistedHistogram result;
-        int numberOfSignificantValueDigits = 3;
+        final PersistedHistogram result;
+        final int numberOfSignificantValueDigits = 3;
         if (configuration.trackHistory())
         {
-            SingleWriterRecorder recorder = new SingleWriterRecorder(numberOfSignificantValueDigits);
+            final SingleWriterRecorder recorder = new SingleWriterRecorder(numberOfSignificantValueDigits);
             result = new LoggingPersistedHistogram(configuration.outputDirectory(), name, recorder);
         }
         else
         {
-            result = new SinglePersistedHistogram(new Histogram(HOURS.toNanos(1), numberOfSignificantValueDigits));
+            final Histogram histogram = new Histogram(HOURS.toNanos(1), numberOfSignificantValueDigits);
+            result = new SinglePersistedHistogram(histogram);
         }
 
-        final PersistedHistogram histogram = result;
-        histograms.put(name, histogram);
-        return histogram;
+        histograms.put(name, result);
+        return result;
     }
 
     /**
@@ -118,10 +106,11 @@ public final class PersistedHistogramSet
      * Print percentile distributions for all histograms.
      *
      * @param out        the output stream.
-     * @param scaleRatio the scale ratio for the output time unit.
      */
-    public void outputPercentileDistributions(final PrintStream out, final double scaleRatio)
+    public void outputPercentileDistributions(final PrintStream out)
     {
+        final double scaleRatio = Configuration.outputScaleRatio(configuration.outputTimeUnit());
+
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
             final String name = entry.getKey();
@@ -134,26 +123,20 @@ public final class PersistedHistogramSet
     /**
      * Save all histograms to files.
      *
-     * @param outputDirectory the output directory.
      * @param status          the benchmark status.
      */
-    public void saveAll(final Path outputDirectory, final PersistedHistogram.Status status) throws IOException
+    public void saveAll(final PersistedHistogram.Status status) throws IOException
     {
-        System.out.println("saveAll:");
+        final Path outputDirectory = configuration.outputDirectory();
         for (final Map.Entry<String, PersistedHistogram> entry : histograms.entrySet())
         {
             final PersistedHistogram histogram = entry.getValue();
             final String name = entry.getKey();
-            System.out.println("    Saving to file: dir: " + outputDirectory + " name: " + name + " status: " + status);
-
             histogram.saveToFile(outputDirectory, name, status);
         }
     }
 
-    /**
-     * Close all histograms.
-     */
-    public void closeAll()
+    public void close() throws Exception
     {
         for (final PersistedHistogram histogram : histograms.values())
         {

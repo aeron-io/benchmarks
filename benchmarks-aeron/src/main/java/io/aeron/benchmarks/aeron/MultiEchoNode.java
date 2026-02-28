@@ -139,7 +139,7 @@ public final class MultiEchoNode implements AutoCloseable, Runnable
                     long result;
                     while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
                     {
-                        checkPublicationResult(result);
+                        checkPublicationResult(result, idleStrategy());
                     }
 
                     bufferClaim

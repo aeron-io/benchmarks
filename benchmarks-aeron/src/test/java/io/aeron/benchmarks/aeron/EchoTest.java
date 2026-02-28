@@ -35,6 +35,8 @@ import io.aeron.benchmarks.Configuration;
 import io.aeron.benchmarks.LoadTestRig;
 import io.aeron.benchmarks.PersistedHistogram;
 import io.aeron.benchmarks.SinglePersistedHistogram;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -100,12 +102,22 @@ class EchoTest extends AbstractTest<MediaDriver, Aeron, EchoMessageTransceiver, 
     private Path tempDir;
 
     @Timeout(10)
-    @Test
-    void ipcChannels(final @TempDir Path tempDir) throws Exception
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "aeron:ipc?term-length=64k|mtu=8k,aeron:ipc?term-length=64k|mtu=8k",
+            "aeron:ipc?term-length=64k|mtu=992,aeron:ipc?term-length=64k|mtu=2k",
+            "aeron:ipc?term-length=64k|mtu=2k,aeron:ipc?term-length=64k|mtu=992",
+            "aeron:ipc?term-length=64k|mtu=512,aeron:ipc?term-length=64k|mtu=512",
+        }
+    )
+    void truncation(
+        final String sourceChannel, final String destinationChannel, final @TempDir Path tempDir) throws Exception
     {
-        setProperty(SOURCE_CHANNEL_PROP_NAME, "aeron:ipc");
-        setProperty(DESTINATION_CHANNEL_PROP_NAME, "aeron:ipc");
-        test(1000, 333, 1, tempDir);
+        setProperty(SOURCE_CHANNEL_PROP_NAME, sourceChannel);
+        setProperty(DESTINATION_CHANNEL_PROP_NAME, destinationChannel);
+        setProperty(USE_TRY_CLAIM_PROP_NAME, "false");
+        test(100, 1111, 1, tempDir);
     }
 
     @Timeout(30)

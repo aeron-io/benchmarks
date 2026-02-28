@@ -386,6 +386,7 @@ do
           -Dio.aeron.benchmarks.aeron.destination.channel=${CLIENT_DESTINATION_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.source.channel=${CLIENT_SOURCE_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.receiver.count=${RECEIVER_COUNT}\
+          -Dio.aeron.benchmarks.aeron.use.try.claim=${USE_TRY_CLAIM:-true}\
           ${CLIENT_EXTRA_PROPERTIES:-}\"\
           && export JAVA_HOME=\"${CLIENT_JAVA_HOME}\" PROCESS_FILE_NAME=\"client-media-driver\" OUTPUT_DIR=\"${output_dir}\"\
           ; $(kill_java_process "${client_class_name}")\

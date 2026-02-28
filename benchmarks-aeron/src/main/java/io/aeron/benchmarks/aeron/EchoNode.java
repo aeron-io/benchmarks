@@ -18,10 +18,10 @@ package io.aeron.benchmarks.aeron;
 import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.ImageFragmentAssembler;
 import io.aeron.Subscription;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.driver.MediaDriver;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.FragmentHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -41,6 +41,7 @@ import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 import static io.aeron.benchmarks.aeron.AeronUtil.connectionTimeoutNs;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationChannel;
 import static io.aeron.benchmarks.aeron.AeronUtil.destinationStreamId;
+import static io.aeron.benchmarks.aeron.AeronUtil.dumpAeronStats;
 import static io.aeron.benchmarks.aeron.AeronUtil.idleStrategy;
 import static io.aeron.benchmarks.aeron.AeronUtil.launchEmbeddedMediaDriverIfConfigured;
 import static io.aeron.benchmarks.aeron.AeronUtil.receiverIndex;
@@ -56,7 +57,6 @@ import static org.agrona.PropertyAction.REPLACE;
  */
 public final class EchoNode implements AutoCloseable, Runnable
 {
-    private final BufferClaim bufferClaim = new BufferClaim();
     private final FragmentHandler fragmentHandler;
     private final ExclusivePublication publication;
     private final Subscription subscription;
@@ -64,6 +64,7 @@ public final class EchoNode implements AutoCloseable, Runnable
     private final MediaDriver mediaDriver;
     private final Aeron aeron;
     private final boolean ownsAeronClient;
+    private final IdleStrategy idleStrategy;
 
     EchoNode(final AtomicBoolean running)
     {
@@ -82,33 +83,22 @@ public final class EchoNode implements AutoCloseable, Runnable
         this.aeron = aeron;
         this.ownsAeronClient = ownsAeronClient;
 
-        System.out.println("EchoNode.init(receiverIndex=" + receiverIndex + ")");
-        System.out.println("  publication (source):     channel=" + sourceChannel() + " stream=" + sourceStreamId());
-        System.out.println("  subscription (destination): channel=" + destinationChannel() +
-            " stream=" + destinationStreamId());
-
         publication = aeron.addExclusivePublication(sourceChannel(), sourceStreamId());
-        System.out.println("  publication created: sessionId=" + publication.sessionId());
-
         subscription = aeron.addSubscription(destinationChannel(), destinationStreamId());
-        System.out.println("  subscription created");
+        idleStrategy = idleStrategy();
 
-        fragmentHandler = (buffer, offset, length, header) ->
+        fragmentHandler = new ImageFragmentAssembler((buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) == receiverIndex)
             {
                 long result;
-                while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
+                idleStrategy.reset();
+                while ((result = publication.offer(buffer, offset, length)) < 0)
                 {
-                    checkPublicationResult(result);
+                    checkPublicationResult(result, idleStrategy);
                 }
-
-                bufferClaim
-                    .flags(header.flags())
-                    .putBytes(buffer, offset, length)
-                    .commit();
             }
-        };
+        });
     }
 
     public void run()
@@ -118,8 +108,7 @@ public final class EchoNode implements AutoCloseable, Runnable
             connectionTimeoutNs(),
             SystemNanoClock.INSTANCE);
 
-        final IdleStrategy idleStrategy = idleStrategy();
-
+        final IdleStrategy idleStrategy = this.idleStrategy;
         final AtomicBoolean running = this.running;
 
         final Image image = subscription.imageAtIndex(0);
@@ -158,7 +147,7 @@ public final class EchoNode implements AutoCloseable, Runnable
     {
         mergeWithSystemProperties(PRESERVE, loadPropertiesFiles(new Properties(), REPLACE, args));
         final Path outputDir = Configuration.resolveLogsDir();
-        final int receiverIndex = AeronUtil.receiverIndex();
+        final int receiverIndex = receiverIndex();
 
         final AtomicBoolean running = new AtomicBoolean(true);
         try (ShutdownSignalBarrier shutdownSignalBarrier = new ShutdownSignalBarrier(() -> running.set(false));
@@ -169,10 +158,14 @@ public final class EchoNode implements AutoCloseable, Runnable
             node.run();
 
             final String prefix = "echo-node-" + receiverIndex + "-";
-            AeronUtil.dumpAeronStats(
+            dumpAeronStats(
                 node.aeron.context().cncFile(),
                 outputDir.resolve(prefix + "aeron-stat.txt"),
                 outputDir.resolve(prefix + "errors.txt"));
+            AeronUtil.dumpLossStat(
+                node.aeron.context().aeronDirectoryName(),
+                outputDir.resolve(prefix + "loss-stat.txt")
+            );
         }
     }
 }

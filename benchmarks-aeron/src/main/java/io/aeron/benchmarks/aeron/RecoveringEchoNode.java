@@ -161,7 +161,7 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
             long result;
             while ((result = publication.tryClaim(length, bufferClaim)) <= 0)
             {
-                checkPublicationResult(result);
+                checkPublicationResult(result, idleStrategy());
             }
             bufferClaim.flags(header.flags()).putBytes(buffer, offset, length).commit();
             responsesSend++;

@@ -35,6 +35,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import static java.util.Objects.requireNonNull;
 
@@ -48,6 +49,13 @@ import static java.util.Objects.requireNonNull;
  * and closes the underlying log writer.
  * <p>
  * {@link #close} releases resources without writing anything. Safe to call after {@link #saveToFile}.
+ * <p>
+ * The following system properties control timing behaviour:
+ * <ul>
+ *   <li>{@code aeron.benchmark.histogram.logging.interval.ms} — minimum interval between histogram interval
+ *       snapshots written to the log file (default: 1000 ms). The background thread poll interval is derived
+ *       from this value as {@code loggingInterval / 5}.</li>
+ * </ul>
  */
 public class LoggingPersistedHistogram implements PersistedHistogram
 {
@@ -55,16 +63,13 @@ public class LoggingPersistedHistogram implements PersistedHistogram
     private static final double[] CSV_PERCENTILES = {50.0, 99.0, 99.9, 99.99, 99.999, 100.0};
     static final long TIMEOUT_MS = TimeUnit.SECONDS.toMillis(10);
     private static final EpochClock EPOCH_CLOCK = SystemEpochClock.INSTANCE;
+    static final long LOGGING_INTERVAL_MS = Long.getLong(
+        "aeron.benchmark.histogram.logging.interval.ms", 100);
+
 
     private final SingleWriterRecorder recorder;
     private final HistogramState state;
-
-    public LoggingPersistedHistogram(
-        final Path outputDirectory,
-        final SingleWriterRecorder recorder)
-    {
-        this(outputDirectory, "loadtestrig", recorder);
-    }
+    private final String namePrefix;
 
     public LoggingPersistedHistogram(
         final Path outputDirectory,
@@ -80,6 +85,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             throw new IllegalArgumentException("Name prefix cannot be blank!");
         }
 
+        this.namePrefix = namePrefix;
         this.recorder = recorder;
         this.state = new HistogramState(
             new File(outputDirectory.toFile(), prefix + FILE_EXTENSION),
@@ -95,8 +101,6 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
     public Path saveToFile(final Path outputDirectory, final String namePrefix, final Status status) throws IOException
     {
-        System.out.println("saveToFile: "+outputDirectory);
-
         requireNonNull(outputDirectory);
 
         final String prefix = namePrefix.trim();
@@ -107,13 +111,24 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
         BackgroundLogger.INSTANCE.syncDeregister(state);
 
+        state.flush();
+        state.closeWriter();
+
         Path result = state.file.toPath();
 
+        Path newPath = result;
+        if (!namePrefix.equals(this.namePrefix))
+        {
+            newPath = outputDirectory.resolve(namePrefix + FILE_EXTENSION);
+        }
         if (status == Status.FAIL)
         {
-            final Path failPath = state.file.toPath().resolveSibling(state.file.getName() + FAILED_FILE_SUFFIX);
-            Files.move(state.file.toPath(), failPath, StandardCopyOption.REPLACE_EXISTING);
-            result = failPath;
+            newPath = state.file.toPath().resolveSibling(newPath + FAILED_FILE_SUFFIX);
+        }
+        if (newPath != result)
+        {
+            Files.move(state.file.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
+            result = newPath;
         }
 
         final Path csvPath = result.resolveSibling(
@@ -170,6 +185,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
     public void close()
     {
         BackgroundLogger.INSTANCE.syncDeregister(state);
+
+        state.closeWriter();
     }
 
     // -------------------------------------------------------------------------
@@ -241,7 +258,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         void poll()
         {
             final long nowMs = EPOCH_CLOCK.time();
-            if (nowMs < lastLogTimeMs + BackgroundLogger.LOGGING_INTERVAL_MS)
+            if (nowMs < lastLogTimeMs + LoggingPersistedHistogram.LOGGING_INTERVAL_MS)
             {
                 return;
             }
@@ -265,10 +282,6 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             openWriter();
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Lightweight request — one per operation, completed by background thread
-    // -------------------------------------------------------------------------
 
     static final class Request
     {
@@ -297,9 +310,9 @@ public class LoggingPersistedHistogram implements PersistedHistogram
             }
         }
 
-        Object await(final long timeoutMs)
+        Object await()
         {
-            final long deadline = System.currentTimeMillis() + timeoutMs;
+            final long deadline = System.currentTimeMillis() + LoggingPersistedHistogram.TIMEOUT_MS;
             synchronized (sync)
             {
                 while (!completed)
@@ -324,16 +337,12 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Singleton background thread — serves all registered HistogramState instances
-    // -------------------------------------------------------------------------
-
     static final class BackgroundLogger
     {
         static final BackgroundLogger INSTANCE = new BackgroundLogger();
 
-        static final long POLL_INTERVAL_MS = 100;
-        static final long LOGGING_INTERVAL_MS = 1_000;
+        private final long pollIntervalNs = TimeUnit.MILLISECONDS.toNanos(
+            LoggingPersistedHistogram.LOGGING_INTERVAL_MS / 5);
 
         private final List<HistogramState> states = new ArrayList<>();
         private final ManyToOneConcurrentArrayQueue<Request> requests = new ManyToOneConcurrentArrayQueue<>(64);
@@ -348,8 +357,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         void syncRegister(final HistogramState state)
         {
             final Request request = new Request(Request.Type.REGISTER, state);
-            requests.offer(request);
-            request.await(TIMEOUT_MS);
+            offer(request);
+            request.await();
         }
 
         void syncDeregister(final HistogramState state)
@@ -359,44 +368,53 @@ public class LoggingPersistedHistogram implements PersistedHistogram
                 return;
             }
             final Request request = new Request(Request.Type.DEREGISTER, state);
-            requests.offer(request);
-            request.await(TIMEOUT_MS);
+            offer(request);
+            request.await();
         }
 
         void syncReset(final HistogramState state)
         {
             final Request request = new Request(Request.Type.RESET, state);
-            requests.offer(request);
-            request.await(TIMEOUT_MS);
+            offer(request);
+            request.await();
         }
 
         Histogram syncAggregate(final HistogramState state)
         {
             final Request request = new Request(Request.Type.AGGREGATE, state);
-            requests.offer(request);
-            return (Histogram)request.await(TIMEOUT_MS);
+            offer(request);
+            return (Histogram)request.await();
+        }
+
+        private void offer(final Request request)
+        {
+            if (!requests.offer(request))
+            {
+                throw new IllegalStateException("Request queue is full, failed to enqueue " + request.type);
+            }
         }
 
         private void run()
         {
+            long nextWakeNs = System.nanoTime() + pollIntervalNs;
+
             while (true)
             {
                 processRequests();
 
-                for (int i = 0; i < states.size(); i++)
+                final int size = states.size();
+                for (int i = 0; i < size; i++)
                 {
                     states.get(i).poll();
                 }
 
-                try
+                final long remainingNs = nextWakeNs - System.nanoTime();
+                if (remainingNs > 0)
                 {
-                    Thread.sleep(POLL_INTERVAL_MS);
+                    LockSupport.parkNanos(remainingNs);
                 }
-                catch (final InterruptedException ex)
-                {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+
+                nextWakeNs += pollIntervalNs;
             }
         }
 
@@ -423,8 +441,6 @@ public class LoggingPersistedHistogram implements PersistedHistogram
                     case DEREGISTER:
                         request.state.deregistered = true;
                         states.remove(request.state);
-                        request.state.flush();
-                        request.state.closeWriter();
                         request.complete(null);
                         break;
                 }

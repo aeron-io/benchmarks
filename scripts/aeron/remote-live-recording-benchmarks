@@ -302,6 +302,7 @@ do
         -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
         -Dio.aeron.benchmarks.aeron.destination.channel=aeron:udp?endpoint=${DESTINATION_IP}:13000${client_interface} \
         -Dio.aeron.benchmarks.aeron.source.channel=aeron:udp?endpoint=${SOURCE_IP}:13100${client_interface} \
+        -Dio.aeron.benchmarks.aeron.use.try.claim=${USE_TRY_CLAIM:-true}\
         -Daeron.archive.dir=${ARCHIVE_DIR} \
         -Daeron.archive.mark.file.dir=/dev/shm/aeron \
         -Daeron.archive.file.sync.level=${fsync} \

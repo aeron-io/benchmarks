@@ -17,12 +17,10 @@ package io.aeron.benchmarks.aeron;
 
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
-import io.aeron.cluster.client.AeronCluster;
 import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
-import io.aeron.logbuffer.BufferClaim;
 import io.aeron.logbuffer.Header;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -33,7 +31,6 @@ import static io.aeron.benchmarks.aeron.AeronUtil.checkPublicationResult;
 
 public final class EchoClusteredService implements ClusteredService
 {
-    private final BufferClaim bufferClaim = new BufferClaim();
     private IdleStrategy idleStrategy;
     private final long snapshotSize;
 
@@ -65,33 +62,15 @@ public final class EchoClusteredService implements ClusteredService
     {
         if (null == session)
         {
-            return; // skip non-client calls
-        }
-
-        final IdleStrategy idleStrategy = this.idleStrategy;
-        final BufferClaim bufferClaim = this.bufferClaim;
-
-        idleStrategy.reset();
-        long result;
-        while ((result = session.tryClaim(length, bufferClaim)) <= 0)
-        {
-            checkPublicationResult(result);
-            idleStrategy.idle();
-        }
-
-        // FIXME: This is not required with the latest master
-        if (ClientSession.MOCKED_OFFER == result)
-        {
-            bufferClaim.commit();
             return;
         }
 
-        final MutableDirectBuffer dstBuffer = bufferClaim.buffer();
-        final int msgOffset = bufferClaim.offset() + AeronCluster.SESSION_HEADER_LENGTH;
-
-        dstBuffer.putBytes(msgOffset, buffer, offset, length);
-
-        bufferClaim.flags(header.flags()).commit();
+        idleStrategy.reset();
+        long result;
+        while ((result = session.offer(buffer, offset, length)) < 0)
+        {
+            checkPublicationResult(result, idleStrategy);
+        }
     }
 
     public void onTimerEvent(final long correlationId, final long timestamp)
@@ -103,13 +82,13 @@ public final class EchoClusteredService implements ClusteredService
         final MutableDirectBuffer buffer = new UnsafeBuffer(new byte[snapshotPublication.maxPayloadLength()]);
         buffer.setMemory(0, buffer.capacity(), (byte)'x');
 
-        for (long written = 0; written < snapshotSize;)
+        for (long written = 0; written < snapshotSize; )
         {
             final long remaining = snapshotSize - written;
             final int toWrite = (int)Math.min(buffer.capacity(), remaining);
 
             idleStrategy.reset();
-            while (0 > snapshotPublication.offer(buffer, 0, toWrite))
+            while (snapshotPublication.offer(buffer, 0, toWrite) < 0)
             {
                 idleStrategy.idle();
             }

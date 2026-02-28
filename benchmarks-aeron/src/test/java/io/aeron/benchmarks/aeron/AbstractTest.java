@@ -76,6 +76,7 @@ abstract class AbstractTest<
         clearProperty(DESTINATION_CHANNEL_PROP_NAME);
         clearProperty(RECEIVER_INDEX_PROP_NAME);
         clearProperty(NUMBER_OF_RECEIVERS_PROP_NAME);
+        clearProperty(USE_TRY_CLAIM_PROP_NAME);
     }
 
     @Timeout(30)
@@ -98,7 +99,8 @@ abstract class AbstractTest<
     @Test
     void largeMessage(final @TempDir Path tempDir) throws Exception
     {
-        test(100, 1344, 1, tempDir);
+        setProperty(USE_TRY_CLAIM_PROP_NAME, "false");
+        test(100, 4096, 1, tempDir);
     }
 
     @SuppressWarnings("MethodLength")
@@ -164,6 +166,11 @@ abstract class AbstractTest<
                 final String ouptput = baos.toString();
                 final int warningIndex = ouptput.indexOf("WARNING:");
                 assertEquals(-1, warningIndex, () -> ouptput.substring(warningIndex));
+            }
+            catch (final Exception ex)
+            {
+                ex.printStackTrace();
+                throw ex;
             }
             finally
             {

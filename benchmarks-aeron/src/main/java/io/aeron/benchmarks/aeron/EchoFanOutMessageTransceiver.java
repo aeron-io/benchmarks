@@ -161,6 +161,14 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
             }
         }
 
+        void reset(final long nowNs)
+        {
+            normalRoundRobin = 0;
+            targetRoundRobin = 0;
+            nextStallNs      = nowNs + intervalNs;
+            stallPending     = false;
+        }
+
         /**
          * Returns the receiver index for the next message.
          * Must be called exactly once per message, before {@link #write}.
@@ -312,7 +320,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
                     final long timestamp = buffer.getLong(offset, LITTLE_ENDIAN);
                     final long now       = clock.nanoTime();
                     recorder.recordValue(now - timestamp);
-                    RECEIVED_MESSAGES_UPDATER.getAndIncrement(this);
+                    receivedMessages++;
                 });
         }
 
@@ -419,7 +427,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
             long result;
             while ((result = publication.tryClaim(messageLength, bufferClaim)) < 0)
             {
-                checkPublicationResult(result);
+                checkPublicationResult(result, idleStrategy());
                 if (0 == --retryCount)
                 {
                     return count;
@@ -449,5 +457,11 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         {
             subscriptions[i].poll(fragmentHandlers[i], FRAGMENT_LIMIT);
         }
+    }
+
+    public void reset()
+    {
+        super.reset();
+        strategy.reset(SystemNanoClock.INSTANCE.nanoTime());
     }
 }
