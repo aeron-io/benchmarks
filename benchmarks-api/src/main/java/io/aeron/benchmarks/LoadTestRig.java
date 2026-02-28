@@ -26,6 +26,7 @@ import org.agrona.concurrent.SystemNanoClock;
 import java.io.PrintStream;
 import java.lang.invoke.VarHandle;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 
 import static java.lang.Math.min;
@@ -48,7 +49,7 @@ import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 public final class LoadTestRig
 {
     private static final long NANOS_PER_SECOND = SECONDS.toNanos(1);
-    private static final long RECEIVE_DEADLINE_NS = SECONDS.toNanos(3);
+    private final long receiveDeadlineNs;
     private final Configuration configuration;
     private final MessageTransceiver messageTransceiver;
     private final PrintStream out;
@@ -102,6 +103,7 @@ public final class LoadTestRig
         final ProgressReporter progressReporter)
     {
         this.configuration = requireNonNull(configuration);
+        this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadline());
         this.messageTransceiver = requireNonNull(messageTransceiver);
         this.out = requireNonNull(out);
         this.clock = requireNonNull(clock);
@@ -264,7 +266,7 @@ public final class LoadTestRig
 
         idleStrategy.reset();
         long receivedMessageCount = messageTransceiver.receivedMessages();
-        final long deadline = clock.nanoTime() + RECEIVE_DEADLINE_NS;
+        final long deadline = clock.nanoTime() + receiveDeadlineNs;
         while (receivedMessageCount < sentMessages)
         {
             messageTransceiver.receive();
@@ -304,7 +306,7 @@ public final class LoadTestRig
             out.printf(
                 "%n*** WARNING: Not all messages were received after %ds deadline: expected %,d vs received " +
                 "%,d (loss %.4f%%)!%n",
-                NANOSECONDS.toSeconds(RECEIVE_DEADLINE_NS),
+                NANOSECONDS.toSeconds(receiveDeadlineNs),
                 result.sentMessages,
                 result.receivedMessages,
                 100.0 - (100.0 * result.receivedMessages / result.sentMessages));
