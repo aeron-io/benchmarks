@@ -25,6 +25,7 @@ import io.aeron.archive.ArchiveMarkFile;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.client.ArchiveException;
 import io.aeron.archive.client.RecordingDescriptorConsumer;
+import io.aeron.archive.codecs.SourceLocation;
 import io.aeron.benchmarks.Configuration;
 import io.aeron.cluster.service.ClusterMarkFile;
 import io.aeron.driver.MediaDriver;
@@ -660,5 +661,18 @@ public final class AeronUtil
                 writer.format("%d distinct errors observed.%n", distinctErrorCount);
             }
         }
+    }
+
+    public static SourceLocation sourceLocationForChannel(final String channel)
+    {
+        SourceLocation location = SourceLocation.NULL_VAL;
+        if(channel.startsWith("aeron:udp")){
+            location = SourceLocation.REMOTE;
+        }
+        else if (channel.startsWith("aeron-spy"))
+        {
+            location = SourceLocation.LOCAL;
+        }
+        return location;
     }
 }
