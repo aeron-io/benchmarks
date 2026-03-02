@@ -181,6 +181,21 @@ class ConfigurationTest
             messageRate, ex.getMessage());
     }
 
+    @Test
+    void throwsIllegalArgumentExceptionIfReceiveDeadlineNegative() throws IOException
+    {
+        final Builder builder = new Builder()
+            .messageRate(100)
+            .messageTransceiverClass(InMemoryMessageTransceiver.class)
+            .receiveDeadlineSeconds(-42);
+
+        final IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, builder::build);
+
+        assertEquals(
+            "'" + RECEIVE_DEADLINE_SECONDS_PROP_NAME + "' cannot be less than 0, got: " +
+            -42, ex.getMessage());
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { Integer.MIN_VALUE, 0 })
     void throwsIllegalArgumentExceptionIfBatchSizeIsInvalid(final int size)
@@ -397,6 +412,7 @@ class ConfigurationTest
         assertEquals(DEFAULT_ITERATIONS, configuration.iterations());
         assertEquals(DEFAULT_BATCH_SIZE, configuration.batchSize());
         assertEquals(MIN_MESSAGE_LENGTH, configuration.messageLength());
+        assertEquals(DEFAULT_RECEIVE_DEADLINE_SECONDS, configuration.receiveDeadlineSeconds());
         assertSame(InMemoryMessageTransceiver.class, configuration.messageTransceiverClass());
         assertSame(BusySpinIdleStrategy.INSTANCE, configuration.idleStrategy());
         assertEquals(Paths.get("results").toAbsolutePath(), configuration.outputDirectory());
@@ -460,6 +476,7 @@ class ConfigurationTest
             "\n    trackHistory=false" +
             "\n    reportProgress=false" +
             "\n    outputTimeUnit=MICROSECONDS" +
+            "\n    receiveDeadlineSeconds=3" +
             "\n    outputDirectory=" + Paths.get("results").toAbsolutePath() +
             "\n    outputFileNamePrefix=my-file_rate=777K_batch=2_length=64" +
             "\n}",
@@ -545,6 +562,20 @@ class ConfigurationTest
             "', cause: class java.lang.Integer", ex.getMessage());
     }
 
+
+    @Test
+    void fromSystemPropertiesThrowsIllegalArgumentIfBadReceiveTimeoutTimeunit()
+    {
+        setProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME, "20x");
+
+        final IllegalArgumentException ex = assertThrows(
+            IllegalArgumentException.class, Configuration::fromSystemProperties);
+
+        assertEquals("non-integer value for property '" + RECEIVE_DEADLINE_SECONDS_PROP_NAME + "', " +
+            "cause: error parsing int: 20x",
+            ex.getMessage());
+    }
+
     @Test
     void fromSystemPropertiesDefaults()
     {
@@ -565,6 +596,7 @@ class ConfigurationTest
         assertSame(BusySpinIdleStrategy.INSTANCE, configuration.idleStrategy());
         assertEquals(Paths.get("results").toAbsolutePath(), configuration.outputDirectory());
         assertEquals(TimeUnit.DAYS, configuration.outputTimeUnit());
+        assertEquals(DEFAULT_RECEIVE_DEADLINE_SECONDS, configuration.receiveDeadlineSeconds());
     }
 
     @Test
@@ -583,6 +615,7 @@ class ConfigurationTest
         setProperty(OUTPUT_FILE_NAME_PROP_NAME, "my-out-file");
         setProperty(TRACK_HISTORY_PROP_NAME, "true");
         setProperty(REPORT_PROGRESS_PROP_NAME, "false");
+        setProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME, "60");
 
         final Configuration configuration = fromSystemProperties();
 
@@ -598,6 +631,7 @@ class ConfigurationTest
         assertFalse(configuration.reportProgress());
         assertEquals(outputDirectory.toAbsolutePath(), configuration.outputDirectory());
         assertTrue(configuration.outputFileNamePrefix().startsWith("my-out-file"));
+        assertEquals(60, configuration.receiveDeadlineSeconds());
     }
 
     @Test
@@ -656,7 +690,8 @@ class ConfigurationTest
             MESSAGE_TRANSCEIVER_PROP_NAME,
             IDLE_STRATEGY_PROP_NAME,
             OUTPUT_DIRECTORY_PROP_NAME,
-            OUTPUT_FILE_NAME_PROP_NAME)
+            OUTPUT_FILE_NAME_PROP_NAME,
+                RECEIVE_DEADLINE_SECONDS_PROP_NAME)
             .forEach(System::clearProperty);
     }
 
