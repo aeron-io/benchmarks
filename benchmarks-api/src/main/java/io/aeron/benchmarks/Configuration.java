@@ -187,12 +187,12 @@ public final class Configuration
     /**
      * Name of the system property to configure the receive deadline in seconds.
      */
-    public static final String RECEIVE_DEADLINE_PROP_NAME = "io.aeron.benchmarks.receive.deadline";
+    public static final String RECEIVE_DEADLINE_SECONDS_PROP_NAME = "io.aeron.benchmarks.receive.deadline.seconds";
 
     /**
      * Default receive deadline in seconds. Default value 3 seconds.
      */
-    public static final int DEFAULT_RECEIVE_DEADLINE = 3;
+    public static final int DEFAULT_RECEIVE_DEADLINE_SECONDS = 3;
 
     /**
      * Max message rate allowed, i.e. 1 message per nanosecond.
@@ -218,7 +218,7 @@ public final class Configuration
     private final boolean trackHistory;
     private final boolean reportProgress;
     private final TimeUnit outputTimeUnit;
-    private final int receiveDeadline;
+    private final int receiveDeadlineSeconds;
 
     private Configuration(final Builder builder)
     {
@@ -238,8 +238,8 @@ public final class Configuration
         this.trackHistory = builder.trackHistory;
         this.reportProgress = builder.reportProgress;
         this.outputTimeUnit = builder.outputTimeUnit;
-        this.receiveDeadline = checkValueRange(builder.receiveDeadline, 0, Integer.MAX_VALUE,
-            RECEIVE_DEADLINE_PROP_NAME);
+        this.receiveDeadlineSeconds = checkValueRange(builder.receiveDeadlineSeconds, 0, Integer.MAX_VALUE,
+            RECEIVE_DEADLINE_SECONDS_PROP_NAME);
         this.rate = rateAsString();
         this.outputFileNamePrefix = computeFileNamePrefix(builder.outputFileNamePrefix);
     }
@@ -387,11 +387,11 @@ public final class Configuration
     /**
      * Deadline in seconds to wait for a response before timing out.
      *
-     * @return receive deadline in seconds, defaults to {@link #DEFAULT_RECEIVE_DEADLINE}.
+     * @return receive deadline in seconds, defaults to {@link #DEFAULT_RECEIVE_DEADLINE_SECONDS}.
      */
-    public long receiveDeadline()
+    public long receiveDeadlineSeconds()
     {
-        return receiveDeadline;
+        return receiveDeadlineSeconds;
     }
 
     /**
@@ -418,7 +418,7 @@ public final class Configuration
             "\n    trackHistory=" + trackHistory +
             "\n    reportProgress=" + reportProgress +
             "\n    outputTimeUnit=" + outputTimeUnit +
-            "\n    receiveDeadline=" + receiveDeadline +
+            "\n    receiveDeadlineSeconds=" + receiveDeadlineSeconds +
             "\n    outputDirectory=" + outputDirectory +
             "\n    outputFileNamePrefix=" + outputFileNamePrefix +
             "\n}";
@@ -472,7 +472,7 @@ public final class Configuration
         private boolean trackHistory = DEFAULT_TRACK_HISTORY;
         private boolean reportProgress = DEFAULT_REPORT_PROGRESS;
         private TimeUnit outputTimeUnit = TimeUnit.MICROSECONDS;
-        private int receiveDeadline = DEFAULT_RECEIVE_DEADLINE;
+        private int receiveDeadlineSeconds = DEFAULT_RECEIVE_DEADLINE_SECONDS;
 
         /**
          * Set the number of warmup iterations.
@@ -634,12 +634,12 @@ public final class Configuration
         /**
          * Set the receive deadline in seconds.
          *
-         * @param receiveDeadline deadline in seconds to wait for a response before timing out.
+         * @param receiveDeadlineSeconds deadline in seconds to wait for a response before timing out.
          * @return this for a fluent API.
          */
-        public Builder receiveDeadline(final int receiveDeadline)
+        public Builder receiveDeadlineSeconds(final int receiveDeadlineSeconds)
         {
-            this.receiveDeadline = receiveDeadline;
+            this.receiveDeadlineSeconds = receiveDeadlineSeconds;
             return this;
         }
 
@@ -713,9 +713,9 @@ public final class Configuration
                 System.getProperty(OUTPUT_TIME_UNIT_PROPERTY_NAME).toUpperCase(Locale.UK)));
         }
 
-        if (isPropertyProvided(RECEIVE_DEADLINE_PROP_NAME))
+        if (isPropertyProvided(RECEIVE_DEADLINE_SECONDS_PROP_NAME))
         {
-            builder.receiveDeadline(intProperty(RECEIVE_DEADLINE_PROP_NAME));
+            builder.receiveDeadlineSeconds(intProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME));
         }
 
         builder

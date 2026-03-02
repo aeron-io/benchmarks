@@ -103,7 +103,7 @@ public final class LoadTestRig
         final ProgressReporter progressReporter)
     {
         this.configuration = requireNonNull(configuration);
-        this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadline());
+        this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
         this.messageTransceiver = requireNonNull(messageTransceiver);
         this.out = requireNonNull(out);
         this.clock = requireNonNull(clock);
