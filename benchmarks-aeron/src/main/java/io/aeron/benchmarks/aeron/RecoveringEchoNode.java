@@ -149,6 +149,15 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
         publication = aeron.addExclusivePublication(sourceChannel(), sourceStreamId());
         System.out.println("  publication created: sessionId=" + publication.sessionId());
 
+       // Wait for publication connection and archive readiness, transceiver will not start subscription until the archive started recording
+        System.out.println("  awaiting publication connected...");
+        AeronUtil.awaitConnected(
+            () -> publication.isConnected() && publication.availableWindow() > 0,
+            connectionTimeoutNs(),
+            SystemNanoClock.INSTANCE);
+        System.out.println("  publication connected");
+
+
         fragmentHandler = (buffer, offset, length, header) ->
         {
             if (buffer.getInt(offset + RECEIVER_INDEX_OFFSET, LITTLE_ENDIAN) != receiverIndex)
@@ -583,19 +592,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                 .controlResponseChannel(System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP))
                 .aeron(aeron);
 
-
-            System.out.println("Waiting....");
-            try
-            {
-                Thread.sleep(30000);
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-            System.out.println("Waiting complete....");
-
-
             persistentSubscription = PersistentSubscription.create(
                 new PersistentSubscription.Context()
                     .recordingId(recordingId)
@@ -620,8 +616,8 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                     .liveStreamId(destinationStreamId())
                     .aeronArchiveContext(archiveContext));
 
-            System.out.printf("  PersistentSubscription created. recordingId=%d, liveChannel=%s%n",
-                recordingId, destinationChannel());
+            System.out.printf("  PersistentSubscription created. recordingId=%d, liveChannel=%s, replayChannel=%s%n",
+                recordingId, destinationChannel(), System.getProperty(REPLAY_CHANNEL_PROP));
         }
 
         public void awaitConnected()

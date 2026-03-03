@@ -35,8 +35,8 @@ FILE_NAME="env-summary-$(hostname)"
 
 mkdir -p "${OUTPUT_PATH}"
 
-MANUFACTURER=$(cat /sys/class/dmi/id/chassis_vendor)
-PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name)
+MANUFACTURER=$(cat /sys/class/dmi/id/chassis_vendor 2>/dev/null || echo "")
+PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "")
 MACHINE_TYPE=$(vserver=$(lscpu | grep -c Hypervisor); if [ "$vserver" -gt 0 ]; then echo "VM"; else echo "Physical"; fi)
 OPERATING_SYSTEM=$(lsb_release -d -s)
 KERNEL=$(uname -r)

@@ -34,10 +34,10 @@ import io.aeron.benchmarks.MessageTransceiver;
 import io.aeron.benchmarks.PersistedHistogramSet;
 
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.aeron.Aeron.connect;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
-import static org.agrona.BitUtil.SIZE_OF_INT;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
 import static io.aeron.benchmarks.aeron.AeronUtil.*;
@@ -294,6 +294,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         publication = aeron.addExclusivePublication(destinationChannel(), destinationStreamId());
         System.out.println("  publication created: sessionId=" + publication.sessionId());
 
+        startArchiveRecording();
+
         final String[] srcChannels = sourceChannels();
         final int[] srcStreams     = sourceStreams();
         assertChannelsAndStreamsMatch(srcChannels, srcStreams, SOURCE_CHANNELS_PROP_NAME, SOURCE_STREAMS_PROP_NAME);
@@ -336,7 +338,6 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         remainingConnectTimeoutNs -= SystemNanoClock.INSTANCE.nanoTime() - startNs;
         System.out.println("  publication connected (remaining " + remainingConnectTimeoutNs / 1_000_000 + "ms)");
 
-        startArchiveRecording();
 
         for (int i = 0; i < receiverCount; i++)
         {
@@ -372,19 +373,44 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         final int controlStream      = Integer.getInteger(ARCHIVE_CONTROL_STREAM_PROP, 0);
         final String responseChannel = System.getProperty(ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP);
 
-        System.out.println("  connecting to archive: " + controlChannel);
+        System.out.printf("  connecting to archive: controlChannel=%s responseChannel=%s controlStream=%s%n",  controlChannel, responseChannel, controlStream);
         aeronArchive = AeronArchive.connect(new AeronArchive.Context()
             .aeron(aeron)
             .controlRequestChannel(controlChannel)
             .controlRequestStreamId(controlStream)
             .controlResponseChannel(responseChannel));
 
-        final String spyChannel = "aeron-spy:" + destinationChannel();
-        final int stream        = destinationStreamId();
+        final SourceLocation sourceLocation = sourceLocationForChannel(recordChannel());
+        final int stream = destinationStreamId();
 
-        System.out.println("  starting recording: channel=" + spyChannel + " stream=" + stream);
-        recordingSubscriptionId = aeronArchive.startRecording(spyChannel, stream, SourceLocation.LOCAL);
-        System.out.println("  recording started: subscriptionId=" + recordingSubscriptionId);
+        System.out.println("  starting recording: channel=" + recordChannel() + " stream=" + stream);
+        recordingSubscriptionId = aeronArchive.startRecording(recordChannel(), stream, sourceLocation);
+
+        System.out.println("  awaiting active recording on channel=" + recordChannel() + " stream=" + stream + "...");
+        awaitRecordingActive(recordChannel(), stream);
+        System.out.println("  recording is active");
+    }
+
+    private void awaitRecordingActive(final String channel, final int stream)
+    {
+       awaitConnected(
+           ()-> {
+               final AtomicBoolean found = new AtomicBoolean(false);
+               aeronArchive.listRecordingsForUri(
+                   0,
+                   1,
+                   channel,
+                   stream,
+                   (controlSessionId, correlationId, recordingId,
+                       startTimestamp, stopTimestamp, startPosition, stopPosition,
+                       initialTermId, segmentFileLength, termBufferLength, mtuLength,
+                       sessionId, streamId, strippedChannel, originalChannel, sourceIdentity) ->
+                       found.set(true));
+               return found.get();
+           },
+           connectionTimeoutNs(),
+           SystemNanoClock.INSTANCE
+       );
     }
 
     public void destroy()
@@ -403,7 +429,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         }
 
         final String prefix = "fan-out-client-";
-        AeronUtil.dumpAeronStats(
+        dumpAeronStats(
             aeron.context().cncFile(),
             logsDir.resolve(prefix + "aeron-stat.txt"),
             logsDir.resolve(prefix + "errors.txt"));
