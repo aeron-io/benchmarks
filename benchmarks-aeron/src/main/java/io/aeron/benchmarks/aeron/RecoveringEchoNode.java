@@ -597,20 +597,6 @@ public final class RecoveringEchoNode implements AutoCloseable, Runnable
                     .recordingId(recordingId)
                     .startPosition(0)
                     .replayStreamId(-5)
-                    .listener(new PersistentSubscriptionListener()
-                {
-                    @Override
-                    public void onLive()
-                    {
-                        System.out.println("onLive");
-                    }
-
-                    @Override
-                    public void onError(Exception e)
-                    {
-                        e.printStackTrace();
-                    }
-                })
                     .replayChannel(System.getProperty(REPLAY_CHANNEL_PROP))
                     .liveChannel(destinationChannel())
                     .liveStreamId(destinationStreamId())
