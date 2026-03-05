@@ -41,9 +41,12 @@ import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static org.agrona.BitUtil.SIZE_OF_LONG;
 import static org.agrona.CloseHelper.closeAll;
 import static io.aeron.benchmarks.aeron.AeronUtil.*;
+import java.util.Random;
+
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_CHANNEL_PROP;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_RESPONSE_CHANNEL_PROP;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.ARCHIVE_CONTROL_STREAM_PROP;
+import static io.aeron.benchmarks.aeron.RecoveringEchoNode.MESSAGE_ID_OFFSET;
 import static io.aeron.benchmarks.aeron.RecoveringEchoNode.PROCESSING_TIME_OFFSET;
 
 /**
@@ -67,12 +70,14 @@ import static io.aeron.benchmarks.aeron.RecoveringEchoNode.PROCESSING_TIME_OFFSE
  *   [TIMESTAMP_OFFSET..+7]         timestamp (long, little-endian)
  *   [RECEIVER_INDEX_OFFSET..+3]    receiver index (int, little-endian)
  *   [PROCESSING_TIME_OFFSET..+7]   processing time (long, nanoseconds, little-endian)
+ *   [MESSAGE_ID_OFFSET..+7]        random message id (long, little-endian) — unique per message,
+ *                                  same across all receivers for the same logical send
  *   [messageLength-8..end]         checksum (long, little-endian)
  * </pre>
  */
 public final class EchoFanOutMessageTransceiver extends MessageTransceiver
 {
-    static final int MIN_MESSAGE_LENGTH = PROCESSING_TIME_OFFSET + SIZE_OF_LONG + SIZE_OF_LONG;
+    static final int MIN_MESSAGE_LENGTH = MESSAGE_ID_OFFSET + SIZE_OF_LONG + SIZE_OF_LONG;
 
     // -------------------------------------------------------------------------
     // ControlStrategy
@@ -102,6 +107,9 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         static final String INTERVAL_US_PROP        = "recovering.echo.control.interval.us";
         static final String STALL_NS_PROP           = "recovering.echo.control.stall.ns";
         static final String TARGETS_PROP            = "recovering.echo.control.targets";
+        /** Fixed seed so every run produces the same messageId sequence */
+        static final long MESSAGE_ID_SEED = 0xDEADBEEFCAFEBABEL;
+
 
         private final long  normalProcessingTimeNs;
         private final long  intervalNs;
@@ -114,6 +122,8 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         private long    nextStallNs      = Long.MAX_VALUE;
         private boolean stallPending     = false;
         private int     stallReceiver    = 0;
+
+        private final   Random messageIdRandom = new Random(MESSAGE_ID_SEED);
 
         ControlStrategy(final int receiverCount)
         {
@@ -167,6 +177,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
             targetRoundRobin = 0;
             nextStallNs      = nowNs + intervalNs;
             stallPending     = false;
+            messageIdRandom.setSeed(MESSAGE_ID_SEED);
         }
 
         /**
@@ -204,6 +215,7 @@ public final class EchoFanOutMessageTransceiver extends MessageTransceiver
         {
             buffer.putLong(offset + TIMESTAMP_OFFSET, timestamp, LITTLE_ENDIAN);
             buffer.putInt(offset + RECEIVER_INDEX_OFFSET, receiver, LITTLE_ENDIAN);
+            buffer.putLong(offset + MESSAGE_ID_OFFSET, messageIdRandom.nextLong(), LITTLE_ENDIAN);
 
             if (stallPending && receiver == stallReceiver)
             {
