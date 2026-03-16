@@ -92,6 +92,11 @@ public final class Configuration
     public static final boolean DEFAULT_REPORT_PROGRESS = false;
 
     /**
+     * Default logging interval for the {@link LoggingPersistedHistogram}.
+     */
+    public static final long DEFAULT_HISTOGRAM_LOGGING_INTERVAL_MS = TimeUnit.SECONDS.toMillis(1);
+
+    /**
      * Minimal length in bytes of a single message. Contains enough space to hold a {@code timestamp} and a
      * {@code checksum}, i.e. two {@code long} values.
      */
@@ -188,6 +193,13 @@ public final class Configuration
      * Name of the system property to configure the receive deadline in seconds.
      */
     public static final String RECEIVE_DEADLINE_SECONDS_PROP_NAME = "io.aeron.benchmarks.receive.deadline.seconds";
+
+    /**
+     * Name of the system property to configure the logging interval on the {@link LoggingPersistedHistogram}.
+     */
+    public static final String HISTOGRAM_LOGGING_INTERVAL_MS_PROP_NAME =
+        "io.aeron.benchmarks.histogram.logging.interval.ms";
+
 
     /**
      * Default receive deadline in seconds. Default value 3 seconds.
