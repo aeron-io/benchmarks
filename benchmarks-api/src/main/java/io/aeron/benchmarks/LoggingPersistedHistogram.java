@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
+import static io.aeron.benchmarks.Configuration.DEFAULT_HISTOGRAM_LOGGING_INTERVAL_MS;
+import static io.aeron.benchmarks.Configuration.HISTOGRAM_LOGGING_INTERVAL_MS_PROP_NAME;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -49,6 +51,13 @@ import static java.util.Objects.requireNonNull;
  * and closes the underlying log writer.
  * <p>
  * {@link #close} releases resources without writing anything. Safe to call after {@link #saveToFile}.
+ * <p>
+ * The following system properties control timing behaviour:
+ * <ul>
+ *   <li>{@code aeron.benchmark.histogram.logging.interval.ms} — minimum interval between histogram interval
+ *       snapshots written to the log file (default: 1000 ms). The background thread poll interval is derived
+ *       from this value as {@code loggingInterval / 5}.</li>
+ * </ul>
  */
 public class LoggingPersistedHistogram implements PersistedHistogram
 {
@@ -56,8 +65,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
     private static final double[] CSV_PERCENTILES = {50.0, 99.0, 99.9, 99.99, 99.999, 100.0};
     static final long TIMEOUT_MS = TimeUnit.SECONDS.toMillis(10);
     private static final EpochClock EPOCH_CLOCK = SystemEpochClock.INSTANCE;
-    private static final long POLL_INTERVAL_NS = TimeUnit.MILLISECONDS.toNanos(100);
-
+    static final long LOGGING_INTERVAL_MS = Long.getLong(
+        HISTOGRAM_LOGGING_INTERVAL_MS_PROP_NAME, DEFAULT_HISTOGRAM_LOGGING_INTERVAL_MS);
 
     private final SingleWriterRecorder recorder;
     private final HistogramState state;
@@ -250,7 +259,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
         void poll()
         {
             final long nowMs = EPOCH_CLOCK.time();
-            if (nowMs < lastLogTimeMs + BackgroundLogger.LOGGING_INTERVAL_MS)
+            if (nowMs < lastLogTimeMs + LoggingPersistedHistogram.LOGGING_INTERVAL_MS)
             {
                 return;
             }
@@ -333,7 +342,8 @@ public class LoggingPersistedHistogram implements PersistedHistogram
     {
         static final BackgroundLogger INSTANCE = new BackgroundLogger();
 
-        static final long LOGGING_INTERVAL_MS = 1_000;
+        private final long pollIntervalNs = TimeUnit.MILLISECONDS.toNanos(
+            LoggingPersistedHistogram.LOGGING_INTERVAL_MS / 5);
 
         private final List<HistogramState> states = new ArrayList<>();
         private final ManyToOneConcurrentArrayQueue<Request> requests = new ManyToOneConcurrentArrayQueue<>(64);
@@ -387,7 +397,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
 
         private void run()
         {
-            long nextWakeNs = System.nanoTime() + POLL_INTERVAL_NS;
+            long nextWakeNs = System.nanoTime() + pollIntervalNs;
 
             while (true)
             {
@@ -405,7 +415,7 @@ public class LoggingPersistedHistogram implements PersistedHistogram
                     LockSupport.parkNanos(remainingNs);
                 }
 
-                nextWakeNs += POLL_INTERVAL_NS;
+                nextWakeNs += pollIntervalNs;
             }
         }
 
