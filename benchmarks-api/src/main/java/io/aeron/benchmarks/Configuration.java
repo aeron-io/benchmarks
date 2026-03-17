@@ -989,7 +989,7 @@ public final class Configuration
         catch (final ClassNotFoundException | ClassCastException ex)
         {
             throw new IllegalArgumentException(
-                "invalid class value for property '" + propName + "', cause: " + ex.getMessage());
+                "invalid class value for property '" + propName + "', cause: " + ex.getMessage(), ex);
         }
     }
 
