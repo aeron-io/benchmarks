@@ -105,13 +105,13 @@ class ResultsAggregatorTest
     @Test
     void multipleHistogramFiles() throws IOException
     {
-        saveToDisc("my.hdr", createHistogram(10, 25, 100, 555, 777, 999));
-        saveToDisc("my.hdr.FAIL", createHistogram(2, 4, 555555, 1232343));
-        saveToDisc("my-combined.hdr.FAIL", createHistogram(3, 4, 11, 1, 1, 22));
-        saveToDisc("other.hdr", createHistogram(1, 45, 200));
+        saveToDisk("my.hdr", createHistogram(10, 25, 100, 555, 777, 999));
+        saveToDisk("my.hdr.FAIL", createHistogram(2, 4, 555555, 1232343));
+        saveToDisk("my-combined.hdr.FAIL", createHistogram(3, 4, 11, 1, 1, 22));
+        saveToDisk("other.hdr", createHistogram(1, 45, 200));
         write(tempDir.resolve("other-report.hgrm"), new byte[]{ 0, -128, 127 }, CREATE_NEW);
-        saveToDisc("hidden-4.ccc", createHistogram(0, 0, 1, 2, 3, 4, 5, 6));
-        saveToDisc("hidden-6.ccc", createHistogram(0, 0, 6, 6, 0));
+        saveToDisk("hidden-4.ccc", createHistogram(0, 0, 1, 2, 3, 4, 5, 6));
+        saveToDisk("hidden-6.ccc", createHistogram(0, 0, 6, 6, 0));
 
         final double reportOutputScalingRatio = 250.0;
         final ResultsAggregator aggregator = new ResultsAggregator(tempDir, reportOutputScalingRatio);
@@ -125,9 +125,9 @@ class ResultsAggregatorTest
         assertArrayEquals(
             new String[]{ "my-combined.hdr.FAIL", "other-combined.hdr" }, aggregateFiles);
         final Histogram myAggregate = createHistogram(2, 25, 100, 555, 777, 999, 555555, 1232343);
-        assertEquals(myAggregate, loadFromDisc("my-combined.hdr.FAIL"));
+        assertEquals(myAggregate, loadFromDisk("my-combined.hdr.FAIL"));
         final Histogram otherAggregate = createHistogram(1, 45, 200);
-        assertEquals(otherAggregate, loadFromDisc("other-combined.hdr"));
+        assertEquals(otherAggregate, loadFromDisk("other-combined.hdr"));
 
         final String[] reportFiles = tempDir.toFile().list((dir, name) ->
             name.endsWith(REPORT_FILE_SUFFIX) || name.endsWith(REPORT_FILE_SUFFIX + FAILED_FILE_SUFFIX));
@@ -165,7 +165,7 @@ class ResultsAggregatorTest
         return histogram;
     }
 
-    private void saveToDisc(final String fileName, final Histogram histogram) throws FileNotFoundException
+    private void saveToDisk(final String fileName, final Histogram histogram) throws FileNotFoundException
     {
         final HistogramLogWriter logWriter = new HistogramLogWriter(tempDir.resolve(fileName).toFile());
         try
@@ -179,11 +179,49 @@ class ResultsAggregatorTest
         }
     }
 
-    private Histogram loadFromDisc(final String fileName) throws FileNotFoundException
+    private Histogram loadFromDisk(final String fileName) throws FileNotFoundException
     {
         try (HistogramLogReader logReader = new HistogramLogReader(tempDir.resolve(fileName).toFile()))
         {
             return (Histogram)logReader.nextIntervalHistogram();
         }
+    }
+
+    @Test
+    void emptyHdrFiles() throws IOException
+    {
+        createDirectories(tempDir.resolve("run-0"));
+        createDirectories(tempDir.resolve("run-1"));
+        saveEmptyToDisk("run-0/my.hdr");
+        saveEmptyToDisk("run-1/my.hdr");
+
+        final ResultsAggregator aggregator = new ResultsAggregator(tempDir, 1000.0);
+
+        aggregator.run();
+
+        assertTrue(exists(tempDir.resolve("my-combined.hdr")));
+        assertFalse(exists(tempDir.resolve("my-report.hgrm")));
+    }
+
+    @Test
+    void emptyFailedHdrFiles() throws IOException
+    {
+        createDirectories(tempDir.resolve("run-0"));
+        createDirectories(tempDir.resolve("run-1"));
+        saveEmptyToDisk("run-0/my.hdr");
+        saveEmptyToDisk("run-1/my.hdr.FAIL");
+
+        final ResultsAggregator aggregator = new ResultsAggregator(tempDir, 1000.0);
+
+        aggregator.run();
+
+        assertTrue(exists(tempDir.resolve("my-combined.hdr.FAIL")));
+        assertFalse(exists(tempDir.resolve("my-report.hgrm.FAIL")));
+    }
+
+    private void saveEmptyToDisk(final String fileName) throws FileNotFoundException
+    {
+        final HistogramLogWriter logWriter = new HistogramLogWriter(tempDir.resolve(fileName).toFile());
+        logWriter.close();
     }
 }
