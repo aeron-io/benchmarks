@@ -104,8 +104,15 @@ public final class ResultsAggregator
                         break;
                     }
                 }
-                saveToFile(aggregate, directory.resolve(filePrefix + AGGREGATE_FILE_SUFFIX + suffix));
-                createReportFile(aggregate, directory.resolve(filePrefix + REPORT_FILE_SUFFIX + suffix));
+                if (null == aggregate)
+                {
+                    createFile(directory.resolve(filePrefix + AGGREGATE_FILE_SUFFIX + suffix));
+                }
+                else
+                {
+                    saveToFile(aggregate, directory.resolve(filePrefix + AGGREGATE_FILE_SUFFIX + suffix));
+                    createReportFile(aggregate, directory.resolve(filePrefix + REPORT_FILE_SUFFIX + suffix));
+                }
             }
         }
     }
