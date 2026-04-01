@@ -58,7 +58,10 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
     public void destroy()
     {
         super.destroy();
-        thread.interrupt();
+        if (null != thread)
+        {
+            thread.interrupt();
+        }
     }
 
     private record OperationScript(File scriptFile) implements Runnable
