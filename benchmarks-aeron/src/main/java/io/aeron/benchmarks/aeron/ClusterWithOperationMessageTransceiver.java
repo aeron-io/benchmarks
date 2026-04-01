@@ -61,15 +61,8 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
         thread.interrupt();
     }
 
-    private static class OperationScript implements Runnable
+    private record OperationScript(File scriptFile) implements Runnable
     {
-        private final File scriptFile;
-
-        private OperationScript(final File scriptFile)
-        {
-            this.scriptFile = scriptFile;
-        }
-
         public void run()
         {
             while (!Thread.currentThread().isInterrupted())
