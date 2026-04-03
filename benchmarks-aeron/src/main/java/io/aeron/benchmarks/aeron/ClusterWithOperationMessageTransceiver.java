@@ -32,6 +32,7 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
     public ClusterWithOperationMessageTransceiver(final NanoClock nanoClock, final ValueRecorder valueRecorder)
     {
         super(nanoClock, valueRecorder);
+        System.out.println("running our ClusterWithOperationMessageTransceiver");
     }
 
     public void init(final Configuration configuration) throws Exception
@@ -44,6 +45,7 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
             throw new IllegalArgumentException(BENCHMARKS_CLUSTER_SCRIPT_NAME_PROP_NAME + " not specified");
         }
 
+        System.out.println("Attempt to load script: " + scriptName);
         final File scriptFile = new File(scriptName);
         if (!scriptFile.exists() && !scriptFile.isFile())
         {
@@ -68,22 +70,29 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
     {
         public void run()
         {
+            System.out.println("starting thread OperationScript");
             while (!Thread.currentThread().isInterrupted())
             {
                 try
                 {
                     //noinspection BusyWait
                     Thread.sleep(5_000);
+                    System.out.println("Running script: " + scriptFile.getAbsolutePath());
                     final ProcessBuilder pb = new ProcessBuilder().command(scriptFile.getAbsolutePath());
                     pb.inheritIO();
                     pb.start().waitFor();
+                    System.out.println("Completed script");
+
                 }
                 catch (final IOException e)
                 {
                     e.printStackTrace(System.err);
+                    return;
                 }
                 catch (final InterruptedException ignore)
                 {
+                    // must return here to end the thread
+                    return;
                 }
             }
         }
