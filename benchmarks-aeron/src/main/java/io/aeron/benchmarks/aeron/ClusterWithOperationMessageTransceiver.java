@@ -74,8 +74,9 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
                 {
                     //noinspection BusyWait
                     Thread.sleep(5_000);
-                    final Process start = new ProcessBuilder().command(scriptFile.getAbsolutePath()).start();
-                    start.waitFor();
+                    final ProcessBuilder pb = new ProcessBuilder().command(scriptFile.getAbsolutePath());
+                    pb.inheritIO();
+                    pb.start().waitFor();
                 }
                 catch (final IOException e)
                 {
