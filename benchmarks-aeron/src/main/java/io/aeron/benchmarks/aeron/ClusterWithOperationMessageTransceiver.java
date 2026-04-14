@@ -25,6 +25,8 @@ import java.io.IOException;
 public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransceiver
 {
     public static final String BENCHMARKS_CLUSTER_SCRIPT_NAME_PROP_NAME = "io.aeron.benchmarks.cluster.script.name";
+    public static final String BENCHMARKS_CLUSTER_SCRIPT_FREQUENCY_PROP_NAME =
+        "io.aeron.benchmarks.cluster.script.frequency.ms";
 
     private OperationScript operationScript;
     private Thread thread;
@@ -40,6 +42,8 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
         super.init(configuration);
 
         final String scriptName = System.getProperty(BENCHMARKS_CLUSTER_SCRIPT_NAME_PROP_NAME);
+        final Long scriptFrequency = Long.getLong(BENCHMARKS_CLUSTER_SCRIPT_FREQUENCY_PROP_NAME, 5_000L);
+
         if (null == scriptName)
         {
             throw new IllegalArgumentException(BENCHMARKS_CLUSTER_SCRIPT_NAME_PROP_NAME + " not specified");
@@ -52,7 +56,7 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
             throw new IllegalArgumentException(scriptName + " is not a valid script");
         }
 
-        this.operationScript = new OperationScript(scriptFile);
+        this.operationScript = new OperationScript(scriptFile, scriptFrequency);
         this.thread = new Thread(operationScript);
         thread.start();
     }
@@ -66,32 +70,57 @@ public class ClusterWithOperationMessageTransceiver extends ClusterMessageTransc
         }
     }
 
-    private record OperationScript(File scriptFile) implements Runnable
+    private record OperationScript(File scriptFile, long scriptFrequencyMs) implements Runnable
     {
+        private static final long BREATHING_ROOM_MS = 100;
+
+        @Override
         public void run()
         {
-            System.out.println("starting thread OperationScript");
+            System.out.println("Running script at frequency " + scriptFrequencyMs + "ms");
+
+            final long scriptFrequencyNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scriptFrequencyMs);
+
+            long nextScheduledTime = System.nanoTime() + scriptFrequencyNanos;
+
             while (!Thread.currentThread().isInterrupted())
             {
                 try
                 {
-                    //noinspection BusyWait
-                    Thread.sleep(5_000);
+                    final long now = System.nanoTime();
+                    final long waitNanos = nextScheduledTime - now;
+
+                    if (waitNanos > 0)
+                    {
+                        java.util.concurrent.TimeUnit.NANOSECONDS.sleep(waitNanos);
+                    }
+                    else
+                    {
+                        System.out.println("!!  Missed our deadline to run script - skip to next time");
+                        nextScheduledTime += scriptFrequencyNanos;
+                        continue;
+                    }
+
                     System.out.println("Running script: " + scriptFile.getAbsolutePath());
-                    final ProcessBuilder pb = new ProcessBuilder().command(scriptFile.getAbsolutePath());
+
+                    final ProcessBuilder pb = new ProcessBuilder()
+                        .command(scriptFile.getAbsolutePath());
                     pb.inheritIO();
                     pb.start().waitFor();
+
                     System.out.println("Completed script");
 
+                    // Schedule relative to when this run was supposed to start.
+                    nextScheduledTime += java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(scriptFrequencyMs);
                 }
                 catch (final IOException e)
                 {
                     e.printStackTrace(System.err);
                     return;
                 }
-                catch (final InterruptedException ignore)
+                catch (final InterruptedException e)
                 {
-                    // must return here to end the thread
+                    Thread.currentThread().interrupt();
                     return;
                 }
             }
