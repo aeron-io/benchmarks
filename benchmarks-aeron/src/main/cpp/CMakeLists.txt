@@ -20,9 +20,16 @@ set(
     NanoMark.h
 )
 
+check_include_file("bsd/stdlib.h" BSDSTDLIB_H_EXISTS)
+find_library(LIBBSD_EXISTS NAMES bsd libbsd)
+
+if (LIBBSD_EXISTS)
+    set(AERON_LIB_BSD_LIBS bsd)
+endif ()
+
 function(benchmark name file)
     add_executable(${name} ${HEADERS} ${file})
-    target_link_libraries(${name} ${AERON_LIBS} ${CMAKE_DL_LIBS} ${GOOGLE_BENCHMARK_LIBS} ${HDRHISTOGRAM_LIBS} ${CMAKE_THREAD_LIBS_INIT})
+    target_link_libraries(${name} ${AERON_LIBS} ${CMAKE_DL_LIBS} ${GOOGLE_BENCHMARK_LIBS} ${HDRHISTOGRAM_LIBS} ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_BSD_LIBS})
     add_dependencies(${name} aeron google_benchmark hdr_histogram)
 endfunction()
 

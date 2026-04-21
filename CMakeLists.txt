@@ -142,12 +142,6 @@ if (NOT DEFINED CMAKE_C_EXTENSIONS)
     set(CMAKE_C_EXTENSIONS OFF)
 endif ()
 
-check_include_file("bsd/stdlib.h" BSDSTDLIB_H_EXISTS)
-find_library(LIBBSD_EXISTS NAMES bsd libbsd)
-
-if (LIBBSD_EXISTS)
-    set(CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES} -lbsd")
-endif ()
 
 # all UNIX-based platform compiler flags
 if (UNIX)
