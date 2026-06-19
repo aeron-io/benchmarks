@@ -151,8 +151,9 @@ public final class LoadTestRig
                     configuration.warmupMessageRate(),
                     configuration.messageLength(),
                     configuration.batchSize());
+                messageTransceiver.onBenchmarkStart(true);
                 send(configuration.warmupIterations(), configuration.warmupMessageRate());
-
+                messageTransceiver.onBenchmarkComplete(true);
                 messageTransceiver.reset();
                 histogramSet.reset();
                 progressReporter.reset();
@@ -164,7 +165,10 @@ public final class LoadTestRig
                 configuration.messageRate(),
                 configuration.messageLength(),
                 configuration.batchSize());
+            messageTransceiver.onBenchmarkStart(false);
             final SendResult result = send(configuration.iterations(), configuration.messageRate());
+            messageTransceiver.onBenchmarkComplete(false);
+
             progressReporter.reset();
 
             out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
