@@ -173,6 +173,28 @@ public abstract class MessageTransceiver extends MessageTransceiverRhsPadding
         receivedMessages++;
     }
 
+    /**
+     * Called when the benchmark starts sending messages.
+     * <p>
+     * This method can be used to implement lifecycle logic.
+     *
+     * @param warmup if the benchmark is performing a warmup or the real benchmark.
+     */
+    public void onBenchmarkStart(final boolean warmup)
+    {
+    }
+
+    /**
+     * Called when the benchmark completes sending messages.
+     * <p>
+     * This method can be used to implement lifecycle logic.
+     *
+     * @param warmup if the benchmark is performing a warmup or the real benchmark.
+     */
+    public void onBenchmarkComplete(final boolean warmup)
+    {
+    }
+
     final void reset()
     {
         valueRecorder.reset();
