@@ -200,11 +200,20 @@ public final class Configuration
     public static final String HISTOGRAM_LOGGING_INTERVAL_MS_PROP_NAME =
         "io.aeron.benchmarks.histogram.logging.interval.ms";
 
+    /**
+     * Name of the system property to configure the receive amplification.
+     */
+    public static final String RECEIVE_AMPLIFICATION_PROP_NAME = "io.aeron.benchmarks.receive.amplification";
 
     /**
      * Default receive deadline in seconds. Default value 3 seconds.
      */
     public static final int DEFAULT_RECEIVE_DEADLINE_SECONDS = 3;
+
+    /**
+     * Default receive amplification. Default value 1; so every request gets 1 response.
+     */
+    public static final int DEFAULT_RECEIVE_AMPLIFICATION = 1;
 
     /**
      * Max message rate allowed, i.e. 1 message per nanosecond.
@@ -231,6 +240,7 @@ public final class Configuration
     private final boolean reportProgress;
     private final TimeUnit outputTimeUnit;
     private final int receiveDeadlineSeconds;
+    private final int receiveAmplification;
 
     private Configuration(final Builder builder)
     {
@@ -252,6 +262,8 @@ public final class Configuration
         this.outputTimeUnit = builder.outputTimeUnit;
         this.receiveDeadlineSeconds = checkValueRange(builder.receiveDeadlineSeconds, 0, Integer.MAX_VALUE,
             RECEIVE_DEADLINE_SECONDS_PROP_NAME);
+        this.receiveAmplification = checkValueRange(
+            builder.receiveAmplification, 1, Integer.MAX_VALUE, RECEIVE_AMPLIFICATION_PROP_NAME);
         this.rate = rateAsString();
         this.outputFileNamePrefix = computeFileNamePrefix(builder.outputFileNamePrefix);
     }
@@ -416,6 +428,18 @@ public final class Configuration
         return outputFileNamePrefix;
     }
 
+    /**
+     * The receive message amplification. A value of n, indicates that for every send message,
+     * n messages are received.
+     *
+     * @return receive amplification, defaults to {@link #DEFAULT_RECEIVE_AMPLIFICATION}.
+     */
+    public int receiveAmplification()
+    {
+        return receiveAmplification;
+    }
+
+
     public String toString()
     {
         return "Configuration{" +
@@ -433,6 +457,7 @@ public final class Configuration
             "\n    receiveDeadlineSeconds=" + receiveDeadlineSeconds +
             "\n    outputDirectory=" + outputDirectory +
             "\n    outputFileNamePrefix=" + outputFileNamePrefix +
+            "\n    receiveAmplification=" + receiveAmplification +
             "\n}";
     }
 
@@ -485,6 +510,7 @@ public final class Configuration
         private boolean reportProgress = DEFAULT_REPORT_PROGRESS;
         private TimeUnit outputTimeUnit = TimeUnit.MICROSECONDS;
         private int receiveDeadlineSeconds = DEFAULT_RECEIVE_DEADLINE_SECONDS;
+        private int receiveAmplification = DEFAULT_RECEIVE_AMPLIFICATION;
 
         /**
          * Set the number of warmup iterations.
@@ -656,6 +682,21 @@ public final class Configuration
         }
 
         /**
+         * Set the receive amplification. With typical benchmarks, for every send message,
+         * a message is received. so there is a 1:1 ratio and hence the receive amplification is 1.
+         * But for certian benchmarks, e.g. sequencer and having multiple non-deterministic statemachines
+         * (so no response deduplication) multiple apps could send a response depending on the benchmark.
+         *
+         * @param receiveAmplification receive amplification.
+         * @return this for a fluent API.
+         */
+        public Builder receiveAmplification(final int receiveAmplification)
+        {
+            this.receiveAmplification = receiveAmplification;
+            return this;
+        }
+
+        /**
          * Create a new instance of the {@link Configuration} class from this builder.
          *
          * @return a {@link Configuration} instance
@@ -728,6 +769,11 @@ public final class Configuration
         if (isPropertyProvided(RECEIVE_DEADLINE_SECONDS_PROP_NAME))
         {
             builder.receiveDeadlineSeconds(intProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME));
+        }
+
+        if (isPropertyProvided(RECEIVE_AMPLIFICATION_PROP_NAME))
+        {
+            builder.receiveAmplification(intProperty(RECEIVE_AMPLIFICATION_PROP_NAME));
         }
 
         builder

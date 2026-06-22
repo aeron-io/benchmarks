@@ -37,8 +37,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.agrona.PropertyAction.PRESERVE;
 import static org.agrona.PropertyAction.REPLACE;
 import static io.aeron.benchmarks.MessageTransceiver.CHECKSUM;
-import static io.aeron.benchmarks.PersistedHistogram.Status.FAIL;
-import static io.aeron.benchmarks.PersistedHistogram.Status.OK;
+
 import static io.aeron.benchmarks.PropertiesUtil.loadPropertiesFiles;
 import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 
@@ -56,6 +55,7 @@ public final class LoadTestRig
     private final NanoClock clock;
     private final PersistedHistogramSet histogramSet;
     private final ProgressReporter progressReporter;
+    private final int receiveAmplification;
 
     public LoadTestRig(final Configuration configuration)
     {
@@ -66,7 +66,7 @@ public final class LoadTestRig
         this.messageTransceiver = createTransceiver(configuration, this.clock, this.histogramSet, null);
         this.progressReporter = buildProgressReporter(configuration, this.out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
-
+        this.receiveAmplification = configuration.receiveAmplification();
     }
 
     public LoadTestRig(
@@ -82,6 +82,8 @@ public final class LoadTestRig
         this.messageTransceiver = createTransceiver(configuration, nanoClock, this.histogramSet, persistedHistogram);
         this.progressReporter = buildProgressReporter(configuration, out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
+        this.receiveAmplification = configuration.receiveAmplification();
+
     }
 
     public LoadTestRig(
@@ -99,6 +101,8 @@ public final class LoadTestRig
             .apply(nanoClock, persistedHistogram.valueRecorder());
         this.progressReporter = buildProgressReporter(configuration, out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
+        this.receiveAmplification = configuration.receiveAmplification();
+
     }
 
     LoadTestRig(
@@ -118,6 +122,7 @@ public final class LoadTestRig
             new PersistedHistogramSet(configuration);
         this.progressReporter = requireNonNull(progressReporter);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
+        this.receiveAmplification = configuration.receiveAmplification();
     }
 
     /**
@@ -174,10 +179,15 @@ public final class LoadTestRig
             out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
             histogramSet.outputPercentileDistributions(out);
 
-            final long expectedTotalNumberOfMessages = configuration.iterations() * (long)configuration.messageRate();
-            warnIfTargetRateNotAchieved(result, expectedTotalNumberOfMessages);
+            final long expectedTotalNumberOfSendMessages =
+                configuration.iterations() * (long)configuration.messageRate();
+            final long expectedTotalNumberOfReceivedMessages =
+                expectedTotalNumberOfSendMessages * receiveAmplification;
+            warnIfTargetRateNotAchieved(
+                result, expectedTotalNumberOfSendMessages, expectedTotalNumberOfReceivedMessages);
 
-            final PersistedHistogram.Status status = result.status(expectedTotalNumberOfMessages);
+            final PersistedHistogram.Status status = result.status(
+                expectedTotalNumberOfSendMessages, expectedTotalNumberOfReceivedMessages);
             histogramSet.saveAll(status);
         }
         finally
@@ -233,7 +243,7 @@ public final class LoadTestRig
                         nextReportTimeNs += NANOS_PER_SECOND;
                     }
 
-                    if (receivedMessageCount < sentMessages)
+                    if (receivedMessageCount < receiveAmplification * sentMessages)
                     {
                         messageTransceiver.receive();
                         final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -276,7 +286,7 @@ public final class LoadTestRig
         idleStrategy.reset();
         long receivedMessageCount = messageTransceiver.receivedMessages();
         final long deadline = clock.nanoTime() + receiveDeadlineNs;
-        while (receivedMessageCount < sentMessages)
+        while (receivedMessageCount < receiveAmplification * sentMessages)
         {
             messageTransceiver.receive();
             final long newReceivedMessageCount = messageTransceiver.receivedMessages();
@@ -298,27 +308,30 @@ public final class LoadTestRig
         return new SendResult(sentMessages, receivedMessageCount);
     }
 
-    private void warnIfTargetRateNotAchieved(final SendResult result, final long expectedTotalNumberOfMessages)
+    private void warnIfTargetRateNotAchieved(
+        final SendResult result,
+        final long expectedTotalNumberOfMessagesSend,
+        final long expectedTotalNumberOfMessagesReceived)
     {
-        if (expectedTotalNumberOfMessages != result.sentMessages)
+        if (expectedTotalNumberOfMessagesSend != result.sentMessages)
         {
             out.printf(
                 "%n*** WARNING: Target message rate not achieved: expected to send %,d messages in " +
                 "total but managed to send only %,d messages (loss %.4f%%)!%n",
-                expectedTotalNumberOfMessages,
+                expectedTotalNumberOfMessagesSend,
                 result.sentMessages,
-                100.0 - (100.0 * result.sentMessages / expectedTotalNumberOfMessages));
+                100.0 - (100.0 * result.sentMessages / expectedTotalNumberOfMessagesSend));
         }
 
-        if (result.sentMessages != result.receivedMessages)
+        if (expectedTotalNumberOfMessagesReceived != result.receivedMessages)
         {
             out.printf(
                 "%n*** WARNING: Not all messages were received after %ds deadline: expected %,d vs received " +
                 "%,d (loss %.4f%%)!%n",
                 NANOSECONDS.toSeconds(receiveDeadlineNs),
-                result.sentMessages,
+                expectedTotalNumberOfMessagesReceived,
                 result.receivedMessages,
-                100.0 - (100.0 * result.receivedMessages / result.sentMessages));
+                100.0 - (100.0 * result.receivedMessages / expectedTotalNumberOfMessagesReceived));
         }
     }
 
@@ -408,9 +421,21 @@ public final class LoadTestRig
             this.receivedMessages = receivedMessages;
         }
 
-        PersistedHistogram.Status status(final long expectedNumberOfMessages)
+        PersistedHistogram.Status status(
+            final long expectedNumberOfSendMessages,
+            final long expectedNumberOfReceivedMessages)
         {
-            return expectedNumberOfMessages == sentMessages && expectedNumberOfMessages == receivedMessages ? OK : FAIL;
+            if (sentMessages != expectedNumberOfSendMessages)
+            {
+                return PersistedHistogram.Status.FAIL;
+            }
+
+            if (receivedMessages != expectedNumberOfReceivedMessages)
+            {
+                return PersistedHistogram.Status.FAIL;
+            }
+
+            return PersistedHistogram.Status.OK;
         }
     }
 }

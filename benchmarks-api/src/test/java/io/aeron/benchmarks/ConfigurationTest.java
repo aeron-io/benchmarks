@@ -198,6 +198,36 @@ class ConfigurationTest
 
     @ParameterizedTest
     @ValueSource(ints = { Integer.MIN_VALUE, 0 })
+    void throwsIllegalArgumentExceptionIfReceiveAmplificationIsInvalid(
+        final int receiveAmplification)
+    {
+        final Builder builder = new Builder()
+            .messageRate(100)
+            .messageTransceiverClass(InMemoryMessageTransceiver.class)
+            .receiveAmplification(receiveAmplification);
+
+        final IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, builder::build);
+
+        assertEquals(
+            "'" + RECEIVE_AMPLIFICATION_PROP_NAME + "' cannot be less than 1, got: " +
+            receiveAmplification, ex.getMessage());
+    }
+
+    @Test
+    void receiveAmplificationCanBeSet()
+    {
+        final Configuration configuration = new Builder()
+            .messageRate(100)
+            .messageTransceiverClass(InMemoryMessageTransceiver.class)
+            .outputFileNamePrefix("test")
+            .receiveAmplification(5)
+            .build();
+
+        assertEquals(5, configuration.receiveAmplification());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { Integer.MIN_VALUE, 0 })
     void throwsIllegalArgumentExceptionIfBatchSizeIsInvalid(final int size)
     {
         final Builder builder = new Builder()
@@ -414,6 +444,7 @@ class ConfigurationTest
         assertEquals(DEFAULT_BATCH_SIZE, configuration.batchSize());
         assertEquals(MIN_MESSAGE_LENGTH, configuration.messageLength());
         assertEquals(DEFAULT_RECEIVE_DEADLINE_SECONDS, configuration.receiveDeadlineSeconds());
+        assertEquals(DEFAULT_RECEIVE_AMPLIFICATION, configuration.receiveAmplification());
         assertSame(InMemoryMessageTransceiver.class, configuration.messageTransceiverClass());
         assertSame(BusySpinIdleStrategy.INSTANCE, configuration.idleStrategy());
         assertEquals(Paths.get("results").toAbsolutePath(), configuration.outputDirectory());
@@ -436,6 +467,7 @@ class ConfigurationTest
             .idleStrategy(YieldingIdleStrategy.INSTANCE)
             .outputDirectory(outputDirectory)
             .outputFileNamePrefix("explicit-opts")
+            .receiveAmplification(7)
             .build();
 
         assertEquals(3, configuration.warmupIterations());
@@ -448,6 +480,7 @@ class ConfigurationTest
         assertSame(YieldingIdleStrategy.INSTANCE, configuration.idleStrategy());
         assertEquals(outputDirectory.toAbsolutePath(), configuration.outputDirectory());
         assertTrue(configuration.outputFileNamePrefix().startsWith("explicit-opts"));
+        assertEquals(7, configuration.receiveAmplification());
     }
 
     @Test
@@ -480,6 +513,7 @@ class ConfigurationTest
             "\n    receiveDeadlineSeconds=3" +
             "\n    outputDirectory=" + Paths.get("results").toAbsolutePath() +
             "\n    outputFileNamePrefix=my-file_rate=777K_batch=2_length=64" +
+            "\n    receiveAmplification=1" +
             "\n}",
             configuration.toString());
     }
@@ -598,6 +632,7 @@ class ConfigurationTest
         assertEquals(Paths.get("results").toAbsolutePath(), configuration.outputDirectory());
         assertEquals(TimeUnit.DAYS, configuration.outputTimeUnit());
         assertEquals(DEFAULT_RECEIVE_DEADLINE_SECONDS, configuration.receiveDeadlineSeconds());
+        assertEquals(DEFAULT_RECEIVE_AMPLIFICATION, configuration.receiveAmplification());
     }
 
     @Test
@@ -617,6 +652,7 @@ class ConfigurationTest
         setProperty(TRACK_HISTORY_PROP_NAME, "true");
         setProperty(REPORT_PROGRESS_PROP_NAME, "false");
         setProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME, "60");
+        setProperty(RECEIVE_AMPLIFICATION_PROP_NAME, "9");
 
         final Configuration configuration = fromSystemProperties();
 
@@ -633,6 +669,7 @@ class ConfigurationTest
         assertEquals(outputDirectory.toAbsolutePath(), configuration.outputDirectory());
         assertTrue(configuration.outputFileNamePrefix().startsWith("my-out-file"));
         assertEquals(60, configuration.receiveDeadlineSeconds());
+        assertEquals(9, configuration.receiveAmplification());
     }
 
     @Test
@@ -692,7 +729,8 @@ class ConfigurationTest
             IDLE_STRATEGY_PROP_NAME,
             OUTPUT_DIRECTORY_PROP_NAME,
             OUTPUT_FILE_NAME_PROP_NAME,
-                RECEIVE_DEADLINE_SECONDS_PROP_NAME)
+            RECEIVE_DEADLINE_SECONDS_PROP_NAME,
+                RECEIVE_AMPLIFICATION_PROP_NAME)
             .forEach(System::clearProperty);
     }
 

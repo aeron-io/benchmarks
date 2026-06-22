@@ -22,6 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import java.io.File;
@@ -408,5 +410,47 @@ class LoadTestRigTest
         final IllegalStateException exception = assertThrows(IllegalStateException.class, loadTestRig::run);
         assertSame(initException, exception);
         verify(messageTransceiver).destroy();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 3})
+    void receiveShouldKeepReceivingMessagesUpToTheAmplifiedSentMessagesLimit(
+        final int receiveAmplification)
+    {
+        final int messageRate = 3;
+        configuration = new Configuration.Builder()
+            .warmupIterations(0)
+            .iterations(1)
+            .messageRate(messageRate)
+            .batchSize(200)
+            .receiveAmplification(receiveAmplification)
+            .outputTimeUnit(MINUTES)
+            .messageTransceiverClass(configuration.messageTransceiverClass())
+            .idleStrategy(idleStrategy)
+            .outputDirectory(configuration.outputDirectory())
+            .outputFileNamePrefix("test")
+            .build();
+
+        final LoadTestRig loadTestRig = new LoadTestRig(
+            configuration,
+            messageTransceiver,
+            out,
+            clock,
+            persistedHistogram,
+            progressReporter);
+
+        final LoadTestRig.SendResult result = loadTestRig.send(1, messageRate);
+
+        final int expectedReceivedMessages = messageRate * receiveAmplification;
+
+        assertEquals(messageRate, result.sentMessages);
+        assertEquals(expectedReceivedMessages, result.receivedMessages);
+
+        verify(messageTransceiver).send(anyInt(), anyInt(), anyLong(), anyLong());
+        verify(messageTransceiver, times(expectedReceivedMessages)).receive();
+        verify(messageTransceiver, times(expectedReceivedMessages + 1)).receivedMessages();
+        verify(messageTransceiver, times(expectedReceivedMessages)).onMessageReceived(anyLong(), anyLong());
+        verify(idleStrategy, times(expectedReceivedMessages + 1)).reset();
+        verifyNoMoreInteractions(messageTransceiver, idleStrategy);
     }
 }
