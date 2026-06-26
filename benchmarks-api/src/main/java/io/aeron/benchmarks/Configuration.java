@@ -202,9 +202,20 @@ public final class Configuration
 
 
     /**
+     * Name of the system property to configure the grace period, in milliseconds, allowed for the send loop to flush
+     * any outstanding messages after the nominal send duration ({@code iterations} seconds) has elapsed.
+     */
+    public static final String SEND_GRACE_MILLIS_PROP_NAME = "io.aeron.benchmarks.send.grace.millis";
+
+    /**
      * Default receive deadline in seconds. Default value 3 seconds.
      */
     public static final int DEFAULT_RECEIVE_DEADLINE_SECONDS = 3;
+
+    /**
+     * Default send grace period in milliseconds. Default value 100 milliseconds.
+     */
+    public static final int DEFAULT_SEND_GRACE_MILLIS = 100;
 
     /**
      * Max message rate allowed, i.e. 1 message per nanosecond.
@@ -231,6 +242,7 @@ public final class Configuration
     private final boolean reportProgress;
     private final TimeUnit outputTimeUnit;
     private final int receiveDeadlineSeconds;
+    private final int sendGraceMillis;
 
     private Configuration(final Builder builder)
     {
@@ -252,6 +264,8 @@ public final class Configuration
         this.outputTimeUnit = builder.outputTimeUnit;
         this.receiveDeadlineSeconds = checkValueRange(builder.receiveDeadlineSeconds, 0, Integer.MAX_VALUE,
             RECEIVE_DEADLINE_SECONDS_PROP_NAME);
+        this.sendGraceMillis = checkValueRange(builder.sendGraceMillis, 0, Integer.MAX_VALUE,
+            SEND_GRACE_MILLIS_PROP_NAME);
         this.rate = rateAsString();
         this.outputFileNamePrefix = computeFileNamePrefix(builder.outputFileNamePrefix);
     }
@@ -407,6 +421,18 @@ public final class Configuration
     }
 
     /**
+     * Grace period, in milliseconds, allowed for the send loop to flush any outstanding messages after the nominal send
+     * duration ({@code iterations} seconds) has elapsed. This absorbs tail jitter (e.g. a GC pause or scheduling hiccup
+     * near the deadline) so the full target message count is sent instead of being clipped a message or two short.
+     *
+     * @return send grace period in milliseconds, defaults to {@link #DEFAULT_SEND_GRACE_MILLIS}.
+     */
+    public long sendGraceMillis()
+    {
+        return sendGraceMillis;
+    }
+
+    /**
      * Output file name prefix used for creating the file name to persist the results histogram.
      *
      * @return output file name prefix.
@@ -431,6 +457,7 @@ public final class Configuration
             "\n    reportProgress=" + reportProgress +
             "\n    outputTimeUnit=" + outputTimeUnit +
             "\n    receiveDeadlineSeconds=" + receiveDeadlineSeconds +
+            "\n    sendGraceMillis=" + sendGraceMillis +
             "\n    outputDirectory=" + outputDirectory +
             "\n    outputFileNamePrefix=" + outputFileNamePrefix +
             "\n}";
@@ -485,6 +512,7 @@ public final class Configuration
         private boolean reportProgress = DEFAULT_REPORT_PROGRESS;
         private TimeUnit outputTimeUnit = TimeUnit.MICROSECONDS;
         private int receiveDeadlineSeconds = DEFAULT_RECEIVE_DEADLINE_SECONDS;
+        private int sendGraceMillis = DEFAULT_SEND_GRACE_MILLIS;
 
         /**
          * Set the number of warmup iterations.
@@ -656,6 +684,19 @@ public final class Configuration
         }
 
         /**
+         * Set the send grace period in milliseconds.
+         *
+         * @param sendGraceMillis grace period, in milliseconds, allowed for the send loop to flush any outstanding
+         *                        messages after the nominal send duration has elapsed.
+         * @return this for a fluent API.
+         */
+        public Builder sendGraceMillis(final int sendGraceMillis)
+        {
+            this.sendGraceMillis = sendGraceMillis;
+            return this;
+        }
+
+        /**
          * Create a new instance of the {@link Configuration} class from this builder.
          *
          * @return a {@link Configuration} instance
@@ -728,6 +769,11 @@ public final class Configuration
         if (isPropertyProvided(RECEIVE_DEADLINE_SECONDS_PROP_NAME))
         {
             builder.receiveDeadlineSeconds(intProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME));
+        }
+
+        if (isPropertyProvided(SEND_GRACE_MILLIS_PROP_NAME))
+        {
+            builder.sendGraceMillis(intProperty(SEND_GRACE_MILLIS_PROP_NAME));
         }
 
         builder
