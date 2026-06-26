@@ -270,6 +270,14 @@ public final class LoadTestRig
                 break;
             }
 
+            if (nowNs >= stopTimeNs)
+            {
+                // Within the send grace window the pacing loop above no longer runs (we are behind schedule), so
+                // poll for responses here to keep draining the messages flushed during grace. This prevents their
+                // receipt - and hence their measured RTT - from being deferred to the post-send drain loop.
+                messageTransceiver.receive();
+            }
+
             if (nowNs >= nextReportTimeNs)
             {
                 progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);

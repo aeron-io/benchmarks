@@ -360,6 +360,13 @@ class LoadTestRigTest
         assertEquals(2, result.receivedMessages);
         verify(messageTransceiver).send(1, 24, 0L, CHECKSUM);
         verify(messageTransceiver).send(1, 24, MILLISECONDS.toNanos(500), CHECKSUM);
+
+        // Responses are drained within the grace window rather than being deferred to the post-send drain loop:
+        // a receive() must occur between the two sends.
+        final InOrder inOrder = inOrder(messageTransceiver);
+        inOrder.verify(messageTransceiver).send(1, 24, 0L, CHECKSUM);
+        inOrder.verify(messageTransceiver).receive();
+        inOrder.verify(messageTransceiver).send(1, 24, MILLISECONDS.toNanos(500), CHECKSUM);
     }
 
     @Test
