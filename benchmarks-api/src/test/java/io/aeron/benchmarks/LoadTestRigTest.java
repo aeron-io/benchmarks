@@ -327,6 +327,49 @@ class LoadTestRigTest
     }
 
     @Test
+    void sendUsesGracePeriodToFlushOutstandingMessagesAfterNominalDuration(final @TempDir Path tempDir)
+    {
+        // Nominal stop time is 1s (iterations=1) from the start at t=0. The default 100ms grace pushes the send
+        // deadline to 1.1s. At t=1.05s the nominal duration has already elapsed, yet the loop is still within the
+        // grace window, so the final message is flushed instead of being clipped one short.
+        when(clock.nanoTime()).thenReturn(
+            0L,
+            MILLISECONDS.toNanos(1050));
+
+        final Configuration configuration = new Configuration.Builder()
+            .messageRate(2)
+            .idleStrategy(idleStrategy)
+            .batchSize(1)
+            .messageLength(24)
+            .messageTransceiverClass(InMemoryMessageTransceiver.class)
+            .outputDirectory(tempDir)
+            .outputFileNamePrefix("test")
+            .build();
+
+        final LoadTestRig loadTestRig = new LoadTestRig(
+            configuration,
+            messageTransceiver,
+            out,
+            clock,
+            persistedHistogram,
+            progressReporter);
+
+        final LoadTestRig.SendResult result = loadTestRig.send(1, 2);
+
+        assertEquals(2, result.sentMessages);
+        assertEquals(2, result.receivedMessages);
+        verify(messageTransceiver).send(1, 24, 0L, CHECKSUM);
+        verify(messageTransceiver).send(1, 24, MILLISECONDS.toNanos(500), CHECKSUM);
+
+        // Responses are drained within the grace window rather than being deferred to the post-send drain loop:
+        // a receive() must occur between the two sends.
+        final InOrder inOrder = inOrder(messageTransceiver);
+        inOrder.verify(messageTransceiver).send(1, 24, 0L, CHECKSUM);
+        inOrder.verify(messageTransceiver).receive();
+        inOrder.verify(messageTransceiver).send(1, 24, MILLISECONDS.toNanos(500), CHECKSUM);
+    }
+
+    @Test
     void endToEndTest(final @TempDir Path tempDir) throws Exception
     {
         final Configuration configuration = new Configuration.Builder()

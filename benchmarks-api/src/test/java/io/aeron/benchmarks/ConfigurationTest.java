@@ -478,6 +478,7 @@ class ConfigurationTest
             "\n    reportProgress=false" +
             "\n    outputTimeUnit=MICROSECONDS" +
             "\n    receiveDeadlineSeconds=3" +
+            "\n    sendGraceMillis=100" +
             "\n    outputDirectory=" + Paths.get("results").toAbsolutePath() +
             "\n    outputFileNamePrefix=my-file_rate=777K_batch=2_length=64" +
             "\n}",
@@ -598,6 +599,7 @@ class ConfigurationTest
         assertEquals(Paths.get("results").toAbsolutePath(), configuration.outputDirectory());
         assertEquals(TimeUnit.DAYS, configuration.outputTimeUnit());
         assertEquals(DEFAULT_RECEIVE_DEADLINE_SECONDS, configuration.receiveDeadlineSeconds());
+        assertEquals(DEFAULT_SEND_GRACE_MILLIS, configuration.sendGraceMillis());
     }
 
     @Test
@@ -617,6 +619,7 @@ class ConfigurationTest
         setProperty(TRACK_HISTORY_PROP_NAME, "true");
         setProperty(REPORT_PROGRESS_PROP_NAME, "false");
         setProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME, "60");
+        setProperty(SEND_GRACE_MILLIS_PROP_NAME, "250");
 
         final Configuration configuration = fromSystemProperties();
 
@@ -633,6 +636,7 @@ class ConfigurationTest
         assertEquals(outputDirectory.toAbsolutePath(), configuration.outputDirectory());
         assertTrue(configuration.outputFileNamePrefix().startsWith("my-out-file"));
         assertEquals(60, configuration.receiveDeadlineSeconds());
+        assertEquals(250, configuration.sendGraceMillis());
     }
 
     @Test
@@ -692,7 +696,8 @@ class ConfigurationTest
             IDLE_STRATEGY_PROP_NAME,
             OUTPUT_DIRECTORY_PROP_NAME,
             OUTPUT_FILE_NAME_PROP_NAME,
-                RECEIVE_DEADLINE_SECONDS_PROP_NAME)
+                RECEIVE_DEADLINE_SECONDS_PROP_NAME,
+            SEND_GRACE_MILLIS_PROP_NAME)
             .forEach(System::clearProperty);
     }
 

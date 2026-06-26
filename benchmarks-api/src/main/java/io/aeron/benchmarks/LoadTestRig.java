@@ -202,6 +202,10 @@ public final class LoadTestRig
         final long totalNumberOfMessages = (long)iterations * numberOfMessages;
         final long startTimeNs = clock.nanoTime();
         final long stopTimeNs = startTimeNs + (iterations * NANOS_PER_SECOND);
+        // Allow a bounded grace period beyond `stopTimeNs` to flush any messages still outstanding once the nominal
+        // duration has elapsed. This absorbs tail jitter (e.g. a GC pause near the deadline) so the full target count
+        // is sent rather than being clipped a message or two short, while still keeping the duration bounded.
+        final long sendDeadlineNs = stopTimeNs + TimeUnit.MILLISECONDS.toNanos(configuration.sendGraceMillis());
 
         long sentMessages = 0;
         long nowNs = startTimeNs, timestampNs = startTimeNs;
@@ -261,9 +265,17 @@ public final class LoadTestRig
                 messageTransceiver.receive();
             }
 
-            if (nowNs >= stopTimeNs)
+            if (nowNs >= sendDeadlineNs)
             {
                 break;
+            }
+
+            if (nowNs >= stopTimeNs)
+            {
+                // Within the send grace window the pacing loop above no longer runs (we are behind schedule), so
+                // poll for responses here to keep draining the messages flushed during grace. This prevents their
+                // receipt - and hence their measured RTT - from being deferred to the post-send drain loop.
+                messageTransceiver.receive();
             }
 
             if (nowNs >= nextReportTimeNs)
