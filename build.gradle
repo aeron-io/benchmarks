@@ -46,6 +46,8 @@ def toolchainCompiler = javaToolchains.compilerFor {
     languageVersion = JavaLanguageVersion.of(buildJavaVersion)
 }
 
+def libs = rootProject.libs
+
 allprojects {
     group = 'io.aeron.benchmarks'
     version = benchmarksVersion
