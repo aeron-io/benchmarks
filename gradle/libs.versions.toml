@@ -1,6 +1,6 @@
 [versions]
-agrona = "2.5.0"
-aeron = "1.52.2"
+agrona = "2.6.0"
+aeron = "1.53.0-SNAPSHOT"
 checkstyle = "12.3.1"
 checker = "3.43.0"
 commons-codec = "1.15"
