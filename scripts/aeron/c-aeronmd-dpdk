@@ -38,8 +38,9 @@ export AERON_DPDK_RX_MEMPOOL_CACHE_SIZE=512
 
 echo "Starting Aeron MD (DPDK) ..."
 
-#exec sudo --preserve-env "${DIR}/aeronmd_dpdk" --log-level *:debug --no-telemetry -l 0 -- \
-exec sudo --preserve-env "${DIR}/aeronmd_dpdk" --no-telemetry -l 0 -- \
+#exec sudo ... --log-level *:debug --no-telemetry -l 0 -- ...
+exec sudo --preserve-env="AERON_DPDK_USER,AERON_DPDK_GROUP,AERON_DPDK_TX_MEMPOOL_PER_QUEUE,AERON_DPDK_TX_MEMPOOL_OPS,AERON_DPDK_TX_MEMPOOL_CACHE_SIZE,AERON_DPDK_RX_MEMPOOL_OPS,AERON_DPDK_RX_MEMPOOL_CACHE_SIZE" \
+  "${DIR}/aeronmd_dpdk" --no-telemetry -l 0 -- \
   "${DIR}/low-latency-driver.properties" \
   "${DIR}/benchmark.properties" \
   "$@"
