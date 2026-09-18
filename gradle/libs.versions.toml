@@ -1,6 +1,6 @@
 [versions]
 agrona = "2.6.1"
-aeron = "1.53.0"
+aeron = "1.53.2"
 checkstyle = "12.3.1"
 checker = "3.43.0"
 commons-codec = "1.15"
