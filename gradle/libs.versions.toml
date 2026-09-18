@@ -22,7 +22,7 @@ protoc = "3.25.7"
 protobufPlugin = "0.10.0"
 scala = "2.13.14"
 shadow = "9.6.1"
-slf4j = "2.0.18"
+slf4j = "2.0.19"
 tomcat = "6.0.53"
 versions = "0.64.0"
 
