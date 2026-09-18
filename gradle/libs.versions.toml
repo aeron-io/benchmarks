@@ -1,5 +1,5 @@
 [versions]
-agrona = "2.6.0"
+agrona = "2.6.1"
 aeron = "1.53.0"
 checkstyle = "12.3.1"
 checker = "3.43.0"
