@@ -24,7 +24,7 @@ scala = "2.13.14"
 shadow = "9.6.1"
 slf4j = "2.0.18"
 tomcat = "6.0.53"
-versions = "0.61.0"
+versions = "0.64.0"
 
 [libraries]
 agrona = { group = "org.agrona", name = "agrona", version.ref = "agrona" }
