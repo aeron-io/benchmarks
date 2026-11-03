@@ -20,7 +20,6 @@ import org.agrona.CloseHelper;
 import org.agrona.LangUtil;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NanoClock;
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.agrona.concurrent.SystemNanoClock;
 
 import java.io.PrintStream;
@@ -49,13 +48,13 @@ import static io.aeron.benchmarks.PropertiesUtil.mergeWithSystemProperties;
 public final class LoadTestRig
 {
     private static final long NANOS_PER_SECOND = SECONDS.toNanos(1);
+    private static final int WARMUP_CHUNKS = 10;
     private final long receiveDeadlineNs;
     private final Configuration configuration;
     private final MessageTransceiver messageTransceiver;
     private final PrintStream out;
     private final NanoClock clock;
     private final PersistedHistogramSet histogramSet;
-    private final ProgressReporter progressReporter;
 
     public LoadTestRig(final Configuration configuration)
     {
@@ -64,7 +63,6 @@ public final class LoadTestRig
         this.clock = SystemNanoClock.INSTANCE;
         this.histogramSet = new PersistedHistogramSet(configuration);
         this.messageTransceiver = createTransceiver(configuration, this.clock, this.histogramSet, null);
-        this.progressReporter = buildProgressReporter(configuration, this.out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
 
     }
@@ -80,7 +78,6 @@ public final class LoadTestRig
         this.clock = requireNonNull(nanoClock);
         this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
         this.messageTransceiver = createTransceiver(configuration, nanoClock, this.histogramSet, persistedHistogram);
-        this.progressReporter = buildProgressReporter(configuration, out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
     }
 
@@ -97,7 +94,6 @@ public final class LoadTestRig
         this.histogramSet = PersistedHistogramSet.wrap(configuration, requireNonNull(persistedHistogram));
         this.messageTransceiver = requireNonNull(transceiverFactory)
             .apply(nanoClock, persistedHistogram.valueRecorder());
-        this.progressReporter = buildProgressReporter(configuration, out);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
     }
 
@@ -106,8 +102,7 @@ public final class LoadTestRig
         final MessageTransceiver messageTransceiver,
         final PrintStream out,
         final NanoClock clock,
-        final PersistedHistogram persistedHistogram,
-        final ProgressReporter progressReporter)
+        final PersistedHistogram persistedHistogram)
     {
         this.configuration = requireNonNull(configuration);
         this.messageTransceiver = requireNonNull(messageTransceiver);
@@ -116,7 +111,6 @@ public final class LoadTestRig
         this.histogramSet = persistedHistogram != null ?
             PersistedHistogramSet.wrap(configuration, persistedHistogram) :
             new PersistedHistogramSet(configuration);
-        this.progressReporter = requireNonNull(progressReporter);
         this.receiveDeadlineNs = TimeUnit.SECONDS.toNanos(configuration.receiveDeadlineSeconds());
     }
 
@@ -152,11 +146,8 @@ public final class LoadTestRig
                     configuration.messageLength(),
                     configuration.batchSize());
                 messageTransceiver.onBenchmarkStart(true);
-                send(configuration.warmupIterations(), configuration.warmupMessageRate());
+                warmup();
                 messageTransceiver.onBenchmarkComplete(true);
-                messageTransceiver.reset();
-                histogramSet.reset();
-                progressReporter.reset();
             }
 
             out.printf("%nRunning measurement for %,d iterations of %,d messages each, with %,d bytes payload and a" +
@@ -166,10 +157,9 @@ public final class LoadTestRig
                 configuration.messageLength(),
                 configuration.batchSize());
             messageTransceiver.onBenchmarkStart(false);
-            final SendResult result = send(configuration.iterations(), configuration.messageRate());
+            final SendResult result = send(
+                configuration.iterations() * NANOS_PER_SECOND, configuration.messageRate());
             messageTransceiver.onBenchmarkComplete(false);
-
-            progressReporter.reset();
 
             out.printf("%nHistogram of RTT latencies in " + configuration.outputTimeUnit() + ".%n");
             histogramSet.outputPercentileDistributions(out);
@@ -187,8 +177,26 @@ public final class LoadTestRig
         }
     }
 
+    /**
+     * The warmup in chunks, so that the send loop exits many times before the measurement: the first exit throws
+     * away the OSR-compiled loop, a single exit at the end of the warmup would do so right before the measurement.
+     * The chunks share the warmup iterations; they do not each run for them.
+     */
+    private void warmup()
+    {
+        final long chunkNs = configuration.warmupIterations() * NANOS_PER_SECOND / WARMUP_CHUNKS;
+
+        for (int chunk = 0; chunk < WARMUP_CHUNKS; chunk++)
+        {
+            send(chunkNs, configuration.warmupMessageRate());
+
+            messageTransceiver.reset();
+            histogramSet.reset();
+        }
+    }
+
     @SuppressWarnings("MethodLength")
-    SendResult send(final int iterations, final int numberOfMessages)
+    SendResult send(final long durationNs, final int numberOfMessages)
     {
         final MessageTransceiver messageTransceiver = this.messageTransceiver;
         final NanoClock clock = this.clock;
@@ -197,19 +205,19 @@ public final class LoadTestRig
         final IdleStrategy idleStrategy = configuration.idleStrategy();
         // The `sendIntervalNs` might be off if the division is not exact in which case more messages will be sent per
         // second than specified via `numberOfMessages`. However, this guarantees that the duration of the send
-        // operation is bound by the number of iterations.
+        // operation is bound by `durationNs`.
         final long sendIntervalNs = NANOS_PER_SECOND * burstSize / numberOfMessages;
-        final long totalNumberOfMessages = (long)iterations * numberOfMessages;
+        final long totalNumberOfMessages = durationNs * numberOfMessages / NANOS_PER_SECOND;
         final long startTimeNs = clock.nanoTime();
-        final long stopTimeNs = startTimeNs + (iterations * NANOS_PER_SECOND);
+        final long stopTimeNs = startTimeNs + durationNs;
         // Allow a bounded grace period beyond `stopTimeNs` to flush any messages still outstanding once the nominal
         // duration has elapsed. This absorbs tail jitter (e.g. a GC pause near the deadline) so the full target count
         // is sent rather than being clipped a message or two short, while still keeping the duration bounded.
         final long sendDeadlineNs = stopTimeNs + TimeUnit.MILLISECONDS.toNanos(configuration.sendGraceMillis());
 
         long sentMessages = 0;
-        long nowNs = startTimeNs, timestampNs = startTimeNs;
-        long nextReportTimeNs = startTimeNs + NANOS_PER_SECOND;
+        long nowNs;
+        long timestampNs = startTimeNs;
 
         int batchSize = (int)min(totalNumberOfMessages, burstSize);
         while (sentMessages < totalNumberOfMessages)
@@ -219,7 +227,6 @@ public final class LoadTestRig
 
             if (totalNumberOfMessages == sentMessages)
             {
-                progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);
                 break;
             }
 
@@ -231,12 +238,6 @@ public final class LoadTestRig
                 long receivedMessageCount = 0;
                 while (nowNs < timestampNs && nowNs < stopTimeNs)
                 {
-                    if (nowNs >= nextReportTimeNs)
-                    {
-                        progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);
-                        nextReportTimeNs += NANOS_PER_SECOND;
-                    }
-
                     if (receivedMessageCount < sentMessages)
                     {
                         messageTransceiver.receive();
@@ -276,12 +277,6 @@ public final class LoadTestRig
                 // poll for responses here to keep draining the messages flushed during grace. This prevents their
                 // receipt - and hence their measured RTT - from being deferred to the post-send drain loop.
                 messageTransceiver.receive();
-            }
-
-            if (nowNs >= nextReportTimeNs)
-            {
-                progressReporter.reportProgress(startTimeNs, nowNs, sentMessages, iterations);
-                nextReportTimeNs += NANOS_PER_SECOND;
             }
         }
 
@@ -331,20 +326,6 @@ public final class LoadTestRig
                 result.sentMessages,
                 result.receivedMessages,
                 100.0 - (100.0 * result.receivedMessages / result.sentMessages));
-        }
-    }
-
-    private static ProgressReporter buildProgressReporter(
-        final Configuration configuration,
-        final PrintStream out)
-    {
-        if (configuration.reportProgress())
-        {
-            return new AsyncProgressReporter(out, new OneToOneConcurrentArrayQueue<>(16));
-        }
-        else
-        {
-            return ProgressReporter.NULL_PROGRESS_REPORTER;
         }
     }
 

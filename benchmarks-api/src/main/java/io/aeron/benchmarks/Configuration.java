@@ -87,11 +87,6 @@ public final class Configuration
     public static final boolean DEFAULT_TRACK_HISTORY = false;
 
     /**
-     * Default progress reporting.
-     */
-    public static final boolean DEFAULT_REPORT_PROGRESS = false;
-
-    /**
      * Default logging interval for the {@link LoggingPersistedHistogram}.
      */
     public static final long DEFAULT_HISTOGRAM_LOGGING_INTERVAL_MS = TimeUnit.SECONDS.toMillis(1);
@@ -180,11 +175,6 @@ public final class Configuration
     public static final String TRACK_HISTORY_PROP_NAME = "io.aeron.benchmarks.track.history";
 
     /**
-     * Name of property to enable or disable progress reporting. Defaults to {@code true}.
-     */
-    public static final String REPORT_PROGRESS_PROP_NAME = "io.aeron.benchmarks.report.progress";
-
-    /**
      * Name of property to define output time unit. Default value: microseconds.
      */
     public static final String OUTPUT_TIME_UNIT_PROPERTY_NAME = "io.aeron.benchmarks.output.time.unit";
@@ -239,7 +229,6 @@ public final class Configuration
     private final String rate;
     private final String outputFileNamePrefix;
     private final boolean trackHistory;
-    private final boolean reportProgress;
     private final TimeUnit outputTimeUnit;
     private final int receiveDeadlineSeconds;
     private final int sendGraceMillis;
@@ -260,7 +249,6 @@ public final class Configuration
         this.outputDirectory = validateOutputDirectory(builder.outputDirectory);
         this.logsDir = resolveLogsDir(outputDirectory);
         this.trackHistory = builder.trackHistory;
-        this.reportProgress = builder.reportProgress;
         this.outputTimeUnit = builder.outputTimeUnit;
         this.receiveDeadlineSeconds = checkValueRange(builder.receiveDeadlineSeconds, 0, Integer.MAX_VALUE,
             RECEIVE_DEADLINE_SECONDS_PROP_NAME);
@@ -391,16 +379,6 @@ public final class Configuration
     }
 
     /**
-     * Indicate if progress reporting should be enabled or disabled.
-     *
-     * @return {@code true} if progress should be reported.
-     */
-    public boolean reportProgress()
-    {
-        return reportProgress;
-    }
-
-    /**
      * Output time unit for the latency histogram. Defaults to microseconds.
      *
      * @return latency history time unit.
@@ -454,7 +432,6 @@ public final class Configuration
             "\n    messageTransceiverClass=" + messageTransceiverClass.getName() +
             "\n    idleStrategy=" + idleStrategy +
             "\n    trackHistory=" + trackHistory +
-            "\n    reportProgress=" + reportProgress +
             "\n    outputTimeUnit=" + outputTimeUnit +
             "\n    receiveDeadlineSeconds=" + receiveDeadlineSeconds +
             "\n    sendGraceMillis=" + sendGraceMillis +
@@ -509,7 +486,6 @@ public final class Configuration
         private Path outputDirectory = Paths.get("results");
         private String outputFileNamePrefix;
         private boolean trackHistory = DEFAULT_TRACK_HISTORY;
-        private boolean reportProgress = DEFAULT_REPORT_PROGRESS;
         private TimeUnit outputTimeUnit = TimeUnit.MICROSECONDS;
         private int receiveDeadlineSeconds = DEFAULT_RECEIVE_DEADLINE_SECONDS;
         private int sendGraceMillis = DEFAULT_SEND_GRACE_MILLIS;
@@ -648,18 +624,6 @@ public final class Configuration
         }
 
         /**
-         * Toggle whether the progress reporting is enabled or disabled.
-         *
-         * @param reportProgress {@code true} to report benchmark progress.
-         * @return this for a fluent API.
-         */
-        public Builder reportProgress(final boolean reportProgress)
-        {
-            this.reportProgress = reportProgress;
-            return this;
-        }
-
-        /**
          * Set the output time unit, i.e. time resolution for the latency histogram.
          *
          * @param timeUnit for the output histogram.
@@ -753,11 +717,6 @@ public final class Configuration
         if (isPropertyProvided(TRACK_HISTORY_PROP_NAME))
         {
             builder.trackHistory(Boolean.getBoolean(TRACK_HISTORY_PROP_NAME));
-        }
-
-        if (isPropertyProvided(REPORT_PROGRESS_PROP_NAME))
-        {
-            builder.reportProgress(Boolean.getBoolean(REPORT_PROGRESS_PROP_NAME));
         }
 
         if (isPropertyProvided(OUTPUT_TIME_UNIT_PROPERTY_NAME))
