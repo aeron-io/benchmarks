@@ -298,7 +298,6 @@ do
         "-Dio.aeron.benchmarks.output.file=${test} \
         -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS} \
         -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
-        -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
         -Dio.aeron.benchmarks.aeron.destination.channel=aeron:udp?endpoint=${DESTINATION_IP}:13000${client_interface} \
         -Dio.aeron.benchmarks.aeron.source.channel=aeron:udp?endpoint=${SOURCE_IP}:13100${client_interface} \
         -Daeron.archive.control.channel=aeron:udp?endpoint=${DESTINATION_IP}:13200${client_interface} \

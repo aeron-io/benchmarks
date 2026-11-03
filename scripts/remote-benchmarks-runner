@@ -112,7 +112,6 @@ function run_benchmarks()
         jvm_opts="export JVM_OPTS=\""
         jvm_opts+="${client_jvm_opts} "
         jvm_opts+="-Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false} "
-        jvm_opts+="-Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false} "
         jvm_opts+="-Dio.aeron.benchmarks.aeron.connection.timeout=${connectionTimeout} "
         jvm_opts+="-Dio.aeron.benchmarks.warmup.iterations=${warmupIterations} "
         jvm_opts+="-Dio.aeron.benchmarks.warmup.message.rate=${warmupMessageRate} "

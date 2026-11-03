@@ -45,7 +45,6 @@ class LoadTestRigTest
     private final PrintStream out = mock(PrintStream.class);
     private final Histogram histogram = mock(Histogram.class);
     private final SinglePersistedHistogram persistedHistogram = mock(SinglePersistedHistogram.class);
-    private final ProgressReporter progressReporter = mock(ProgressReporter.class);
     private final MessageTransceiver messageTransceiver = spy(
         new MessageTransceiver(clock, histogram)
         {
@@ -99,7 +98,7 @@ class LoadTestRigTest
 
         configuration = new Configuration.Builder()
             .warmupIterations(1)
-            .warmupMessageRate(1)
+            .warmupMessageRate(10)
             .iterations(1)
             .messageRate(1)
             .outputTimeUnit(NANOSECONDS)
@@ -114,12 +113,11 @@ class LoadTestRigTest
             messageTransceiver,
             out,
             clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
         loadTestRig.run();
 
-        final InOrder inOrder = inOrder(messageTransceiver, out, persistedHistogram, progressReporter);
+        final InOrder inOrder = inOrder(messageTransceiver, out, persistedHistogram);
         inOrder.verify(out)
             .printf("%nStarting latency benchmark using the following configuration:%n%s%n", configuration);
         inOrder.verify(messageTransceiver).init(configuration);
@@ -129,11 +127,12 @@ class LoadTestRigTest
             configuration.warmupMessageRate(),
             configuration.messageLength(),
             configuration.batchSize());
-        inOrder.verify(messageTransceiver).send(1, configuration.messageLength(), nanoTime, CHECKSUM);
-        inOrder.verify(progressReporter).reportProgress(nanoTime, nanoTime, 1, 1);
-        inOrder.verify(messageTransceiver).reset();
-        inOrder.verify(persistedHistogram).reset();
-        inOrder.verify(progressReporter).reset();
+        for (int chunk = 0; chunk < 10; chunk++)
+        {
+            inOrder.verify(messageTransceiver).send(1, configuration.messageLength(), nanoTime, CHECKSUM);
+            inOrder.verify(messageTransceiver).reset();
+            inOrder.verify(persistedHistogram).reset();
+        }
         inOrder.verify(out).printf("%nRunning measurement for %,d iterations of %,d messages each, with %,d bytes" +
             " payload and a burst size of %,d...%n",
             configuration.iterations(),
@@ -141,8 +140,6 @@ class LoadTestRigTest
             configuration.messageLength(),
             configuration.batchSize());
         inOrder.verify(messageTransceiver).send(1, configuration.messageLength(), nanoTime, CHECKSUM);
-        inOrder.verify(progressReporter).reportProgress(nanoTime, nanoTime, 1, 1);
-        inOrder.verify(progressReporter).reset();
         inOrder.verify(out).printf("%nHistogram of RTT latencies in NANOSECONDS.%n");
         inOrder.verify(persistedHistogram).outputPercentileDistribution(out, 1.0);
         inOrder.verify(persistedHistogram).saveToFile(
@@ -173,8 +170,7 @@ class LoadTestRigTest
             messageTransceiver,
             out,
             clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
         loadTestRig.run();
 
@@ -203,10 +199,9 @@ class LoadTestRigTest
             configuration,
             messageTransceiver,
             out, clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
-        loadTestRig.send(1, 3);
+        loadTestRig.send(SECONDS.toNanos(1), 3);
 
         verify(messageTransceiver).send(anyInt(), anyInt(), anyLong(), anyLong());
         verify(messageTransceiver, times(3)).receive();
@@ -249,10 +244,9 @@ class LoadTestRigTest
             messageTransceiver,
             out,
             clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
-        final LoadTestRig.SendResult result = loadTestRig.send(2, 9);
+        final LoadTestRig.SendResult result = loadTestRig.send(SECONDS.toNanos(2), 9);
 
         assertEquals(18, result.sentMessages);
         assertEquals(18, result.receivedMessages);
@@ -266,8 +260,6 @@ class LoadTestRigTest
         verify(messageTransceiver, times(9)).receive();
         verify(messageTransceiver, times(10)).receivedMessages();
         verify(messageTransceiver, times(18)).onMessageReceived(anyLong(), anyLong());
-        verify(progressReporter).reportProgress(1000000000L, 2400000000L, 8, 2);
-        verify(progressReporter).reportProgress(1000000000L, 2950000000L, 18, 2);
         verifyNoMoreInteractions(out, clock, idleStrategy, messageTransceiver);
     }
 
@@ -302,10 +294,9 @@ class LoadTestRigTest
             configuration,
             messageTransceiver,
             out, clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
-        final LoadTestRig.SendResult result = loadTestRig.send(10, 100);
+        final LoadTestRig.SendResult result = loadTestRig.send(SECONDS.toNanos(10), 100);
 
         assertEquals(120, result.sentMessages);
         assertEquals(120, result.receivedMessages);
@@ -320,9 +311,6 @@ class LoadTestRigTest
         verify(messageTransceiver, times(120)).receive();
         verify(messageTransceiver, times(119)).receivedMessages();
         verify(messageTransceiver, times(120)).onMessageReceived(anyLong(), anyLong());
-        verify(progressReporter).reportProgress(500000000L, 6751000000L, 30, 10);
-        verify(progressReporter).reportProgress(500000000L, 9200000000L, 60, 10);
-        verify(progressReporter).reportProgress(500000000L, 9201000000L, 90, 10);
         verifyNoMoreInteractions(out, clock, idleStrategy, messageTransceiver);
     }
 
@@ -351,10 +339,9 @@ class LoadTestRigTest
             messageTransceiver,
             out,
             clock,
-            persistedHistogram,
-            progressReporter);
+            persistedHistogram);
 
-        final LoadTestRig.SendResult result = loadTestRig.send(1, 2);
+        final LoadTestRig.SendResult result = loadTestRig.send(SECONDS.toNanos(1), 2);
 
         assertEquals(2, result.sentMessages);
         assertEquals(2, result.receivedMessages);
@@ -445,8 +432,7 @@ class LoadTestRigTest
             messageTransceiver,
             out,
             mock(NanoClock.class),
-            mock(PersistedHistogram.class),
-            progressReporter);
+            mock(PersistedHistogram.class));
 
         final IllegalStateException exception = assertThrows(IllegalStateException.class, loadTestRig::run);
         assertSame(initException, exception);

@@ -381,7 +381,6 @@ do
           -Dio.aeron.benchmarks.output.file=${test}\
           -Dio.aeron.benchmarks.output.time.unit=${OUTPUT_TIME_UNIT:-MICROSECONDS}\
           -Dio.aeron.benchmarks.track.history=${TRACK_HISTORY:-false}\
-          -Dio.aeron.benchmarks.report.progress=${REPORT_PROGRESS:-false}\
           -Dio.aeron.benchmarks.output.directory=${CLIENT_BENCHMARKS_PATH}/${output_dir}\
           -Dio.aeron.benchmarks.aeron.destination.channel=${CLIENT_DESTINATION_CHANNEL}\
           -Dio.aeron.benchmarks.aeron.source.channel=${CLIENT_SOURCE_CHANNEL}\

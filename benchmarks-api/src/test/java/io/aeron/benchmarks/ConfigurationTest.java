@@ -114,21 +114,6 @@ class ConfigurationTest
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = { true, false })
-    void reportProgressCanBeSet(final boolean reportProgress)
-    {
-        final Configuration configuration = new Builder()
-            .warmupMessageRate(1)
-            .messageRate(1_000)
-            .messageTransceiverClass(InMemoryMessageTransceiver.class)
-            .reportProgress(reportProgress)
-            .outputFileNamePrefix("test")
-            .build();
-
-        assertEquals(reportProgress, configuration.reportProgress());
-    }
-
-    @ParameterizedTest
     @ValueSource(ints = { -200, 0 })
     void throwsIllegalArgumentExceptionIfIterationsIsInvalid(final int iterations)
     {
@@ -475,7 +460,6 @@ class ConfigurationTest
             "\n    messageTransceiverClass=io.aeron.benchmarks.InMemoryMessageTransceiver" +
             "\n    idleStrategy=NoOpIdleStrategy{alias=noop}" +
             "\n    trackHistory=false" +
-            "\n    reportProgress=false" +
             "\n    outputTimeUnit=MICROSECONDS" +
             "\n    receiveDeadlineSeconds=3" +
             "\n    sendGraceMillis=100" +
@@ -617,7 +601,6 @@ class ConfigurationTest
         setProperty(OUTPUT_DIRECTORY_PROP_NAME, outputDirectory.toAbsolutePath().toString());
         setProperty(OUTPUT_FILE_NAME_PROP_NAME, "my-out-file");
         setProperty(TRACK_HISTORY_PROP_NAME, "true");
-        setProperty(REPORT_PROGRESS_PROP_NAME, "false");
         setProperty(RECEIVE_DEADLINE_SECONDS_PROP_NAME, "60");
         setProperty(SEND_GRACE_MILLIS_PROP_NAME, "250");
 
@@ -632,7 +615,6 @@ class ConfigurationTest
         assertSame(InMemoryMessageTransceiver.class, configuration.messageTransceiverClass());
         assertInstanceOf(YieldingIdleStrategy.class, configuration.idleStrategy());
         assertTrue(configuration.trackHistory());
-        assertFalse(configuration.reportProgress());
         assertEquals(outputDirectory.toAbsolutePath(), configuration.outputDirectory());
         assertTrue(configuration.outputFileNamePrefix().startsWith("my-out-file"));
         assertEquals(60, configuration.receiveDeadlineSeconds());
