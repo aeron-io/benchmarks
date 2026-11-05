@@ -154,10 +154,6 @@ project(':benchmarks-api') {
 }
 
 project(':benchmarks-aeron') {
-    configurations {
-        aeronAgent
-    }
-
     dependencies {
         api project(':benchmarks-api')
         annotationProcessor libs.jmh.generator.annprocess
@@ -165,13 +161,6 @@ project(':benchmarks-aeron') {
         implementation libs.aeron.cluster
         implementation libs.disruptor
         runtimeOnly libs.aeron.samples
-        aeronAgent libs.aeron.agent
-    }
-
-    tasks.register('copyAeronAgent', Copy) {
-        from configurations.aeronAgent
-        into layout.buildDirectory.dir('agent')
-        rename { 'aeron-agent.jar' }
     }
 }
 

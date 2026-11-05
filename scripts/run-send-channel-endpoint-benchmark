@@ -19,25 +19,19 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 jar="${DIR}/../benchmarks-all/build/libs/benchmarks.jar"
-agent_jar="${DIR}/../benchmarks-aeron/build/agent/aeron-agent.jar"
 
 if [[ ! -f "${jar}" ]]; then
   "${DIR}/../gradlew" -p "${DIR}/.." :benchmarks-all:shadowJar
 fi
 
-if [[ ! -f "${agent_jar}" ]]; then
-  "${DIR}/../gradlew" -p "${DIR}/.." :benchmarks-aeron:copyAeronAgent
-fi
-
-# JMH forked benchmark JVMs inherit the launching JVM's input arguments by default (that's
-# also why the --add-opens/-D flags below reach the fork), so putting -javaagent here is
-# enough to have it loaded in the benchmark fork without needing -jvmArgsAppend.
+# Since Aeron 1.53.0 tracing is built in and no longer needs the aeron-agent javaagent. JMH forked
+# benchmark JVMs inherit the launching JVM's input arguments by default, so the -D/--add-opens flags
+# below reach the fork, e.g. pass -jvmArgsAppend "-Daeron.event.log=FRAME_OUT" to enable FRAME_OUT tracing.
 exec "${JAVA_HOME}/bin/java" \
   -Dagrona.disable.bounds.checks=true \
   -XX:+UseParallelGC \
   --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-opens java.base/java.util.zip=ALL-UNNAMED \
-  "-javaagent:${agent_jar}" \
   -jar "${jar}" \
   SendChannelEndpointBenchmark \
   "$@"
