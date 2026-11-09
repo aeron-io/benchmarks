@@ -1,6 +1,6 @@
 [versions]
-agrona = "2.6.1"
-aeron = "1.53.3"
+agrona = "2.7.0"
+aeron = "1.54.0"
 checkstyle = "12.3.1"
 checker = "3.43.0"
 commons-codec = "1.15"
@@ -24,11 +24,10 @@ scala = "2.13.14"
 shadow = "9.6.1"
 slf4j = "2.0.20"
 tomcat = "6.0.53"
-versions = "0.64.0"
+versions = "0.66.0"
 
 [libraries]
 agrona = { group = "org.agrona", name = "agrona", version.ref = "agrona" }
-aeron-agent = { group = "io.aeron", name = "aeron-agent", version.ref = "aeron" }
 aeron-cluster = { group = "io.aeron", name = "aeron-cluster", version.ref = "aeron" }
 aeron-samples = { group = "io.aeron", name = "aeron-samples", version.ref = "aeron" }
 checker = { group= "org.checkerframework" , name="checker-qual", version.ref = "checker" }

@@ -56,10 +56,9 @@ esac
 function startNode() {
   node=$1
   JVM_OPTS="-Xms16M"
-# Useful for logging...
-#  JVM_OPTS="${JVM_OPTS} -javaagent:${HOME}/.m2/repository/io/aeron/aeron-agent/1.38.1-SNAPSHOT/aeron-agent-1.38.1-SNAPSHOT.jar"
-  JVM_OPTS="${JVM_OPTS} -Daeron.event.cluster.log=all -Daeron.event.cluster.log.disable=APPEND_POSITION,COMMIT_POSITION"
-  JVM_OPTS="${JVM_OPTS} -Daeron.event.log.filename=log_${node}.log"
+# Useful for logging (no javaagent needed since Aeron 1.53.0)...
+#  JVM_OPTS="${JVM_OPTS} -Daeron.event.cluster.log=all -Daeron.event.cluster.log.disable=APPEND_POSITION,COMMIT_POSITION"
+#  JVM_OPTS="${JVM_OPTS} -Daeron.event.log.filename=log_${node}.log"
   export JVM_OPTS
 
   ${AERON_SCRIPT_HOME}/cluster-node ${DIR}/cluster.properties $TYPE_CONFIG "${DIR}/node${node}.properties" > "node${node}.out" &
