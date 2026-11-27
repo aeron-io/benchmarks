@@ -147,9 +147,41 @@ subprojects {
 }
 
 project(':benchmarks-api') {
+    // The one module released (to Artifactory), with sources and Javadoc jars, as Aeron's modules are.
+    apply plugin: 'benchmarks.publishing'
+
     dependencies {
         api libs.agrona
         api libs.hdrHistogram
+    }
+
+    java {
+        withSourcesJar()
+        withJavadocJar()
+    }
+
+    jar {
+        manifest.attributes(
+            'Automatic-Module-Name': 'io.aeron.benchmarks.api',
+            'Implementation-Title': 'Aeron Benchmarks API',
+            'Implementation-Vendor': 'Adaptive Financial Consulting Limited',
+            'Implementation-Version': project.version
+        )
+    }
+
+    javadoc {
+        failOnError = true
+        title = '<h1>Aeron Benchmarks API</h1>'
+        options.bottom = '<i>Copyright &#169; 2015-2025 Real Logic Limited. All Rights Reserved.</i>'
+        options.encoding = 'UTF-8'
+        options.docEncoding = 'UTF-8'
+        options.charSet = 'UTF-8'
+        options.addStringOption('-release', java.sourceCompatibility.majorVersion)
+        // The JDK's own implementation tags, which the API's Javadoc uses.
+        options.tags('apiNote:a:API Note:', 'implSpec:a:Implementation Requirements:', 'implNote:a:Implementation Note:')
+        options.addBooleanOption('Werror', true)
+        // Aeron uses -Xdoclint:all; the missing group stays off until every public member has a comment.
+        options.addBooleanOption('Xdoclint:all,-missing', true)
     }
 }
 

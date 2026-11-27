@@ -1,0 +1,83 @@
+
+/*
+ * Copyright 2015-2025 Real Logic Limited.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Publishes every MavenPublication in the project to an Artifactory Maven repository with the shared benchmarks POM.
+// Modelled on Aeron's `aeron.publishing` plugin, without signing or Central Portal, and for release versions only.
+// Projects applying this plugin declare their own publication(s).
+plugins {
+    id 'maven-publish'
+}
+
+def getConfigProperty(final String projectPropertyName, final String envVarName) {
+    String value = project.findProperty(projectPropertyName)
+    if (!value) {
+        value = System.getenv(envVarName)
+        if (!value) {
+            return null
+        }
+    }
+
+    value = value.trim()
+
+    return value ? value : null
+}
+
+def isReleaseVersion = !version.toString().endsWith('-SNAPSHOT')
+// The repository is named only at publish time, so the public build carries no Artifactory address and a local build
+// or a fork has nowhere to publish to.
+def artifactoryPublishUrl = getConfigProperty('artifactoryPublishUrl', 'ARTIFACTORY_PUBLISH_URL')
+def artifactoryWriterAccessToken = getConfigProperty('artifactoryWriterAccessToken', 'ARTIFACTORY_WRITER_ACCESS_TOKEN')
+
+publishing {
+    publications.withType(MavenPublication).configureEach {
+        pom {
+            name = project.name
+            description = 'API for latency benchmarks of Aeron and other messaging systems.'
+            url = 'https://github.com/aeron-io/benchmarks'
+
+            scm {
+                connection = 'scm:git:https://github.com/aeron-io/benchmarks.git'
+                developerConnection = 'scm:git:https://github.com/aeron-io/benchmarks.git'
+                url = 'https://github.com/aeron-io/benchmarks.git'
+            }
+
+            licenses {
+                license {
+                    name = 'The Apache License, Version 2.0'
+                    url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+                }
+            }
+        }
+    }
+
+    // Snapshots are never published: there is no repository to publish one to.
+    if (isReleaseVersion && artifactoryPublishUrl && artifactoryWriterAccessToken) {
+        repositories {
+            maven {
+                name = 'artifactory'
+                url = uri(artifactoryPublishUrl)
+                credentials(HttpHeaderCredentials) {
+                    name = 'Authorization'
+                    value = "Bearer ${artifactoryWriterAccessToken}"
+                }
+                authentication {
+                    header(HttpHeaderAuthentication)
+                }
+            }
+        }
+    }
+}

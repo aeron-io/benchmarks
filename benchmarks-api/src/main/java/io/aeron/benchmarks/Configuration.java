@@ -57,7 +57,6 @@ import static org.agrona.Strings.isEmpty;
  *    ...
  *    final Configuration configuration = builder.build();
  * </pre>
- * </p>
  */
 public final class Configuration
 {
